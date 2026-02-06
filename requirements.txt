@@ -4,5 +4,5 @@ pandas_ta
 numpy
 scikit-learn
 xgboost==2.0.3
-tensorflow>=2.16
+tensorflow[and-cuda]==2.20.0
 matplotlib
