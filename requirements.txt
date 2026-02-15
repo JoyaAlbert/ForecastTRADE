@@ -9,3 +9,4 @@ tensorflow[and-cuda]==2.20.0
 matplotlib
 statsmodels
 scipy
+rich

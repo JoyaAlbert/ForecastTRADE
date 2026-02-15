@@ -28,9 +28,13 @@ from datetime import datetime, timedelta
 from lstm_predictor import generate_lstm_regime_features
 from run_logger import AccumulativeRunLogger
 from triple_barrier_labeler import TripleBarrierLabeler
+from rich_ui import RichUI
 
 # VisualizationEngine will be imported dynamically when needed
 VisualizationEngine = None
+
+# Initialize Rich UI
+ui = RichUI()
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
@@ -182,11 +186,12 @@ def fetch_data(ticker, vix_ticker, start, end):
         df = stock_data.join(vix_data, how='left')
         df.index.name = 'date'
         
-        print(f"✅ Datos obtenidos: {len(df)} registros")
+        # Display using Rich UI
+        ui.show_progress_fetching(ticker, len(df))
         return df
         
     except Exception as e:
-        print(f"❌ Error fetching data: {e}")
+        ui.show_error(f"Failed to fetch data: {e}")
         raise
 
 # --- 3. FEATURE ENGINEERING ---
@@ -240,7 +245,6 @@ def engineer_features(df):
         df.rename(columns=rename_dict, inplace=True)
     else:
         print(f"   ⚠️ Bollinger Bands columns warning: Found {len(bb_map)}/5 expected")
-        print(f"      Available BB columns: {[col for col in df.columns if 'BB' in col]}")
     
     # Keltner Channels (volatility bands using ATR)
     df.ta.kc(length=20, scalar=2, append=True)
@@ -293,34 +297,23 @@ def engineer_features(df):
     df['vix_change'] = df['vix_close'].pct_change()
     
     # === MARKET REGIME INTEGRATION FEATURES ===
-    # These features provide contextual awareness of market conditions (inflation, trends, volatility regimes)
-    
-    # 1. Rolling Volatility Z-Score: Indicates if current volatility is high or low relative to history
-    # High z-score = extreme volatility environment (panic/greed)
-    # Used to understand volatility regime and adjust model confidence
     volatility_mean = df['volatility_20'].rolling(window=252).mean()
     volatility_std = df['volatility_20'].rolling(window=252).std()
     df['rolling_volatility_zscore'] = (df['volatility_20'] - volatility_mean) / (volatility_std + 1e-8)
     
-    # 2. Trend Strength (ADX-based): Continuous metric for market strength
-    # ADX is already in dataframe from ta.adx(), Direct use avoids multicolinearity
-    # High ADX (>30) = strong trend, Low ADX (<20) = ranging market
-    df['ADX_14'] = df.get('ADX_14', 20)  # Default to neutral if missing
+    df['ADX_14'] = df.get('ADX_14', 20)
     
-    # 3. Distance to 200-Day MA: Measure of bull/bear market position
-    # Positive = price above MA200 (bullish), Negative = below MA200 (bearish)
-    # Large distance = strong trend, Small distance = ranging
     df['ma_200'] = df['close'].rolling(window=200).mean()
     df['distance_to_ma200'] = (df['close'] - df['ma_200']) / df['close']
 
-    # 4. Automatic regime change detection (volatility + trend state shifts)
     vol_state = np.where(df['rolling_volatility_zscore'] > 1.0, 1,
                          np.where(df['rolling_volatility_zscore'] < -1.0, -1, 0))
     trend_state = np.where(df['distance_to_ma200'] >= 0, 1, -1)
     df['regime_state'] = (vol_state * 2) + trend_state
     df['regime_change'] = (df['regime_state'] != df['regime_state'].shift(1)).fillna(0).astype(int)
     
-    print("   ✅ Market regime features added: volatility_zscore, trend_strength, ma200_distance")
+    # Use Rich UI to show progress
+    ui.show_progress_engineering(len(df.columns))
     
     # Log returns (smoother than simple returns)
     df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
@@ -329,7 +322,6 @@ def engineer_features(df):
     # Money Flow (High-Low-Close index)
     df.ta.hlc3(append=True)
     
-    print(f"Total features created: {len(df.columns)}")
     return df
 
 # --- 4. TARGET DEFINITION ---
@@ -365,10 +357,6 @@ def define_target(df):
     # Max holding: 10-20 days, less in high volatility markets
     max_holding_days = max(10, min(20, int(10 / realized_vol)))  # Adaptive
     
-    print(f"   Profit Target (adaptive): +{profit_target_pct*100:.2f}%")
-    print(f"   Stop Loss (asymmetric): -{stop_loss_pct*100:.2f}%")
-    print(f"   Max Holding Days: {max_holding_days}")
-    
     # 2. Apply Triple Barrier Labeling
     labeler = TripleBarrierLabeler(
         profit_target_pct=profit_target_pct,
@@ -379,13 +367,15 @@ def define_target(df):
     labels = labeler.label_data_vectorized(df)
     df['target'] = labels
     
-    # 3. Print label distribution
+    # 3. Print label distribution using Rich UI
     unique_labels, counts = np.unique(labels.values, return_counts=True)
-    print(f"\n   ✅ Label Distribution (Triple Barrier):")
+    labels_dist = []
     for label, count in zip(unique_labels, counts):
-        label_name = {1: "Profit Target 🎯", -1: "Stop Loss ⛔", 0: "Time-out ⏱️"}
+        label_name = "Profit Target" if label == 1 else ("Stop Loss" if label == -1 else "Time-out")
         pct = 100 * count / len(labels)
-        print(f"      {label_name.get(label, f'Label {label}')}: {count:6d} ({pct:5.1f}%)")
+        labels_dist.append((label_name, count, pct))
+    
+    ui.show_triple_barrier_info(profit_target_pct, stop_loss_pct, max_holding_days, labels_dist)
     
     # 4. Keep simple binary target for compatibility (0/1 for probability of UP)
     # Convert labels: 1 → 1 (profit), -1 → 0 (loss), 0 → random (timeout)
@@ -399,10 +389,6 @@ def define_target(df):
     
     # Use target_binary as main target
     df['target'] = df['target_binary']
-    
-    print(f"   ✅ Final binary target distribution:")
-    print(f"      Class 0 (Sell/Loss): {(df['target']==0).sum()} ({100*(df['target']==0).mean():.1f}%)")
-    print(f"      Class 1 (Buy/Win): {(df['target']==1).sum()} ({100*(df['target']==1).mean():.1f}%)")
     
     return df
 
@@ -1181,68 +1167,16 @@ def train_and_evaluate_timeseries(df):
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    print("🚀 Starting Optimized ForecastTRADE Pipeline (v2.0)...")
-    print("Features: TimeSeriesSplit | Data Leakage Prevention | Financial Metrics")
+    # Display Rich UI header
+    ui.display_header()
     
-    # === TICKER SELECTION MENU ===
-    print("\n" + "="*60)
-    print("📊 SELECT STOCK TO FORECAST")
-    print("="*60)
-    
-    tickers = {
-        '1': {'symbol': 'NVDA', 'name': 'NVIDIA Corporation'},
-        '2': {'symbol': 'TSLA', 'name': 'Tesla Inc.'},
-        '3': {'symbol': 'AAPL', 'name': 'Apple Inc.'},
-        '4': {'symbol': 'MSFT', 'name': 'Microsoft Corporation'},
-        '5': {'symbol': 'IBE.MC', 'name': 'Iberdrola SA'},
-        '6': {'symbol': 'CUSTOM', 'name': 'Enter custom ticker'}
-    }
-    
-    print("\nAvailable options:")
-    for key, value in tickers.items():
-        if value['symbol'] != 'CUSTOM':
-            if key == '3':  # Highlight default
-                print(f"  [{key}] {value['name']} ({value['symbol']}) ⭐ DEFAULT")
-            else:
-                print(f"  [{key}] {value['name']} ({value['symbol']})")
-        else:
-            print(f"  [{key}] {value['name']}")
-    
-    # Get user selection
-    try:
-        choice = input("\nEnter your choice (1-6) [default: 3 - AAPL]: ").strip()
-        
-        if not choice:  # Default to Apple
-            choice = '3'
-        
-        if choice in tickers:
-            if choice == '6':  # Custom ticker
-                custom_ticker = input("Enter custom ticker symbol (e.g., GOOGL, AMZN): ").strip().upper()
-                if custom_ticker:
-                    selected_ticker = custom_ticker
-                    selected_name = custom_ticker
-                else:
-                    print("⚠️ Invalid ticker. Using default: AAPL")
-                    selected_ticker = 'AAPL'
-                    selected_name = 'Apple Inc.'
-            else:
-                selected_ticker = tickers[choice]['symbol']
-                selected_name = tickers[choice]['name']
-        else:
-            print("⚠️ Invalid choice. Using default: AAPL")
-            selected_ticker = 'AAPL'
-            selected_name = 'Apple Inc.'
-    except (KeyboardInterrupt, EOFError):
-        print("\n⚠️ Selection cancelled. Using default: AAPL")
-        selected_ticker = 'AAPL'
-        selected_name = 'Apple Inc.'
+    # === TICKER SELECTION WITH RICH UI ===
+    ui.select_asset()
+    selected_ticker = ui.selected_ticker
+    selected_name = ui.selected_name
     
     # Update config with selected ticker
     Config.TICKER = selected_ticker
-    
-    print("\n" + "="*60)
-    print(f"✅ Selected: {selected_name} ({selected_ticker})")
-    print("="*60)
     
     # 1. Fetch data for the last N years
     start_date = (datetime.today() - timedelta(days=Config.TRAINING_YEARS * 365)).strftime('%Y-%m-%d')
@@ -1281,10 +1215,6 @@ if __name__ == "__main__":
             
             # === FINAL CONSOLIDATED RECOMMENDATION ===
             if future_preds and len(future_preds) > 0:
-                print("\n" + "="*80)
-                print("🔮 FINAL TRADING RECOMMENDATION (Ensemble from All Folds)")
-                print("="*80)
-                
                 # Get latest price and targets
                 last_price = main_df['close'].iloc[-1]
                 last_date = main_df.index[-1]
@@ -1296,62 +1226,18 @@ if __name__ == "__main__":
                 max_prob = np.max([p['probability'] for p in future_preds])
                 min_prob = np.min([p['probability'] for p in future_preds])
                 
-                print(f"\n📊 Ensemble Prediction Statistics:")
-                print(f"   Average Probability: {avg_prob*100:.1f}%")
-                print(f"   Range: {min_prob*100:.1f}% - {max_prob*100:.1f}%")
-                print(f"   Folds Agreement: {len(future_preds)} models")
+                # Display with Rich UI
+                ui.show_final_summary(selected_ticker, future_preds)
+                recommendation = ui.show_recommendation(
+                    avg_prob, last_price, profit_target, stop_loss,
+                    last_date.strftime('%Y-%m-%d')
+                )
                 
-                print(f"\n💰 Trading Setup:")
-                print(f"   Current Price: ${last_price:.2f} (as of {last_date.strftime('%Y-%m-%d')})")
-                print(f"   Profit Target: ${profit_target:.2f} (+1.50%)")
-                print(f"   Stop Loss: ${stop_loss:.2f} (-0.75%)")
-                print(f"   Risk/Reward Ratio: 2:1")
-                
-                # Generate final recommendation based on ensemble
-                print(f"\n" + "="*80)
-                if avg_prob > 0.65:
-                    print("✅ FINAL DECISION: 🟢 STRONG BUY")
-                    print("="*80)
-                    print(f"Confidence: HIGH ({avg_prob*100:.1f}%)")
-                    print(f"Expected outcome: Price rises to ${profit_target:.2f}")
-                    print(f"Potential profit: ${profit_target - last_price:.2f} (+1.50%)")
-                    print(f"\nAction Plan:")
-                    print(f"  1. Enter LONG position at ${last_price:.2f}")
-                    print(f"  2. Set Take Profit at ${profit_target:.2f}")
-                    print(f"  3. Set Stop Loss at ${stop_loss:.2f}")
-                    print(f"  4. Hold for maximum 20 days")
-                elif avg_prob < 0.35:
-                    print("🛑 FINAL DECISION: 🔴 DO NOT BUY / AVOID")
-                    print("="*80)
-                    print(f"Confidence: HIGH ({(1-avg_prob)*100:.1f}% loss probability)")
-                    print(f"Expected outcome: Price falls to ${stop_loss:.2f}")
-                    print(f"Potential loss: ${last_price - stop_loss:.2f} (-0.75%)")
-                    print(f"\nAction Plan:")
-                    print(f"  1. DO NOT enter any position")
-                    print(f"  2. Wait for win probability > 65%")
-                    print(f"  3. Monitor daily for signal improvement")
-                    print(f"  4. Consider SHORT position if probability < 20%")
-                else:
-                    print("⚠️ FINAL DECISION: 🟡 HOLD / WAIT FOR BETTER SIGNAL")
-                    print("="*80)
-                    print(f"Confidence: MEDIUM (uncertain, {avg_prob*100:.1f}%)")
-                    print(f"Expected outcome: Unclear direction")
-                    print(f"\nAction Plan:")
-                    print(f"  1. STAY OUT of the market")
-                    print(f"  2. Signal too weak for confident trading")
-                    print(f"  3. Wait for probability > 65% (buy) or < 35% (sell)")
-                    print(f"  4. Re-run analysis in 1-2 days")
-                
-                print("\n⚠️  Risk Warning:")
-                print("   - Past performance doesn't guarantee future results")
-                print("   - Always use proper position sizing (max 2-5% of capital)")
-                print("   - Never trade without a stop loss")
-                print("   - Market conditions can change rapidly")
-                print("="*80)
+                ui.show_success("Pipeline execution completed successfully!")
         else:
-            print("❌ Error: No data left after preprocessing. Check data quality and date ranges.")
+            ui.show_error("No data left after preprocessing. Check data quality and date ranges.")
     else:
-        print("❌ Error: Failed to fetch initial data. Check tickers and network connection.")
+        ui.show_error("Failed to fetch initial data. Check tickers and network connection.")
         
-    print("\n✅ Pipeline finished.")
+    ui.show_success("Pipeline finished.")
 
