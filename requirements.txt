@@ -3,6 +3,9 @@ pandas
 pandas_ta
 numpy
 scikit-learn
+imbalanced-learn
 xgboost==2.0.3
 tensorflow[and-cuda]==2.20.0
 matplotlib
+statsmodels
+scipy
