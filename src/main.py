@@ -1184,6 +1184,66 @@ if __name__ == "__main__":
     print("🚀 Starting Optimized ForecastTRADE Pipeline (v2.0)...")
     print("Features: TimeSeriesSplit | Data Leakage Prevention | Financial Metrics")
     
+    # === TICKER SELECTION MENU ===
+    print("\n" + "="*60)
+    print("📊 SELECT STOCK TO FORECAST")
+    print("="*60)
+    
+    tickers = {
+        '1': {'symbol': 'NVDA', 'name': 'NVIDIA Corporation'},
+        '2': {'symbol': 'TSLA', 'name': 'Tesla Inc.'},
+        '3': {'symbol': 'AAPL', 'name': 'Apple Inc.'},
+        '4': {'symbol': 'MSFT', 'name': 'Microsoft Corporation'},
+        '5': {'symbol': 'IBE.MC', 'name': 'Iberdrola SA'},
+        '6': {'symbol': 'CUSTOM', 'name': 'Enter custom ticker'}
+    }
+    
+    print("\nAvailable options:")
+    for key, value in tickers.items():
+        if value['symbol'] != 'CUSTOM':
+            if key == '3':  # Highlight default
+                print(f"  [{key}] {value['name']} ({value['symbol']}) ⭐ DEFAULT")
+            else:
+                print(f"  [{key}] {value['name']} ({value['symbol']})")
+        else:
+            print(f"  [{key}] {value['name']}")
+    
+    # Get user selection
+    try:
+        choice = input("\nEnter your choice (1-6) [default: 3 - AAPL]: ").strip()
+        
+        if not choice:  # Default to Apple
+            choice = '3'
+        
+        if choice in tickers:
+            if choice == '6':  # Custom ticker
+                custom_ticker = input("Enter custom ticker symbol (e.g., GOOGL, AMZN): ").strip().upper()
+                if custom_ticker:
+                    selected_ticker = custom_ticker
+                    selected_name = custom_ticker
+                else:
+                    print("⚠️ Invalid ticker. Using default: AAPL")
+                    selected_ticker = 'AAPL'
+                    selected_name = 'Apple Inc.'
+            else:
+                selected_ticker = tickers[choice]['symbol']
+                selected_name = tickers[choice]['name']
+        else:
+            print("⚠️ Invalid choice. Using default: AAPL")
+            selected_ticker = 'AAPL'
+            selected_name = 'Apple Inc.'
+    except (KeyboardInterrupt, EOFError):
+        print("\n⚠️ Selection cancelled. Using default: AAPL")
+        selected_ticker = 'AAPL'
+        selected_name = 'Apple Inc.'
+    
+    # Update config with selected ticker
+    Config.TICKER = selected_ticker
+    
+    print("\n" + "="*60)
+    print(f"✅ Selected: {selected_name} ({selected_ticker})")
+    print("="*60)
+    
     # 1. Fetch data for the last N years
     start_date = (datetime.today() - timedelta(days=Config.TRAINING_YEARS * 365)).strftime('%Y-%m-%d')
     
