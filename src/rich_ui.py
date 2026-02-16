@@ -203,7 +203,7 @@ class RichUI:
         self.console.print()
     
     def show_triple_barrier_info(self, profit_pct, stop_loss_pct, max_days, labels_dist):
-        """Display Triple Barrier Method information"""
+        """Display Triple Barrier Method information (DEPRECATED - use percentile labeling)"""
         panel_content = Text()
         panel_content.append("Triple Barrier Labeling Configuration\n", style="bold bright_cyan")
         panel_content.append("\n📊 Adaptive Parameters:\n", style="bright_cyan")
@@ -222,6 +222,42 @@ class RichUI:
             border_style="bright_cyan",
             padding=(1, 2),
             title="[bold]Target Definition[/bold]"
+        )
+        self.console.print(panel)
+        self.console.print()
+    
+    def show_percentile_labeling_info(self, horizon, p_bottom, p_top, threshold_sell, threshold_buy, labels_dist):
+        """Display Percentile-Based Labeling information"""
+        panel_content = Text()
+        panel_content.append("Percentile-Based Labeling Configuration\n", style="bold bright_cyan")
+        panel_content.append("\n📊 Strategy: Quantile Classification\n", style="bright_cyan")
+        panel_content.append(f"  • Forward Horizon:  {horizon} days\n", style="white")
+        panel_content.append(f"  • SELL Percentile:  Bottom {p_bottom}% (≤ {threshold_sell*100:+.2f}%)\n", style="bright_red")
+        panel_content.append(f"  • BUY Percentile:   Top {100-p_top}% (≥ {threshold_buy*100:+.2f}%)\n", style="bright_green")
+        panel_content.append(f"  • HOLD (Discarded): Middle {p_top-p_bottom}%\n\n", style="dim")
+        panel_content.append("Label Distribution:\n", style="bright_cyan")
+        
+        for label, count, pct in labels_dist:
+            if "SELL" in label:
+                label_emoji = "📉"
+                style_color = "bright_red"
+            elif "BUY" in label:
+                label_emoji = "📈"
+                style_color = "bright_green"
+            else:
+                label_emoji = "⏸️"
+                style_color = "dim"
+            
+            bar = "█" * int(pct / 2) + "░" * int((100 - pct) / 2)
+            panel_content.append(f"  {label_emoji} {label:<20} |{bar}| {pct:5.1f}% ({count:6d})\n", style=style_color)
+        
+        panel_content.append("\n✅ Guaranteed Balance: 35% SELL / 35% BUY / 30% HOLD\n", style="bold bright_yellow")
+        
+        panel = Panel(
+            panel_content,
+            border_style="bright_magenta",
+            padding=(1, 2),
+            title="[bold]Target Definition (Percentile Method)[/bold]"
         )
         self.console.print(panel)
         self.console.print()
@@ -359,7 +395,7 @@ class RichUI:
         panel_content.append(f"  🎯 Profit Target: ${profit_target:.2f} ", style="white")
         panel_content.append(f"(+1.50%)\n", style="bright_green")
         panel_content.append(f"  🛑 Stop Loss:     ${stop_loss:.2f} ", style="white")
-        panel_content.append(f"(-0.75%)\n\n", style="bright_red")
+        panel_content.append(f"(-1.50%)\n\n", style="bright_red")
         
         panel_content.append("Forecast:\n", style="bright_cyan")
         panel_content.append(f"  📊 Win Probability: ", style="white")

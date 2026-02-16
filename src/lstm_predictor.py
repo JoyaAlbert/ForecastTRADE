@@ -24,9 +24,9 @@ class LstmConfig:
     """Configuration for the LSTM feature generator."""
     WINDOW_SIZE = 60  # Shorter window for faster processing, better for feature gen
     HORIZONS = [5, 10, 20]  # Predict 5, 10, 20 days ahead
-    EPOCHS = 50
-    BATCH_SIZE = 32
-    REGULARIZATION_L2 = 0.001
+    EPOCHS = 80  # Increased for better learning
+    BATCH_SIZE = 64  # Larger batches for stable gradients
+    REGULARIZATION_L2 = 0.0001  # Reduced from 0.001 to allow learning
     LATENT_DIM = 32  # Full hidden state dimension before compression
     COMPRESSED_LATENT_DIM = 10  # Bottleneck: reduce to 10 features (from 32) - 70% compression baseline
 
@@ -54,10 +54,19 @@ def engineer_lstm_features(df):
     return df[features].copy(), features
 
 def create_return_targets(df, horizons):
-    """Create future return targets for training."""
+    """
+    Create future return targets for training.
+    
+    UPDATED: Now returns both continuous returns AND binary directional targets
+    Binary targets help LSTM learn patterns aligned with classification tasks
+    """
     targets = {}
     for h in horizons:
+        # Continuous returns (original)
         targets[f'return_{h}d'] = df['returns'].shift(-h)
+        # Binary directional targets (NEW: aligned with classification)
+        # 1 if positive return, 0 if negative (helps learn directional patterns)
+        targets[f'direction_{h}d'] = (df['returns'].shift(-h) > 0).astype(float)
     return pd.DataFrame(targets)
 
 def create_sequences(data, targets, window_size):
@@ -76,7 +85,7 @@ def build_feature_lstm(input_shape, n_outputs, latent_dim=32, compressed_dim=10)
     - Bidirectional LSTM layers learn temporal patterns
     - Hidden state (latent vector) extracted from the final LSTM layer
     - Bottleneck compression layer reduces latent dims from 32 to 10
-    - Tanh activation normalizes compressed space between -1 and 1
+    - Linear activation preserves variance and dynamic range
     - This compression forces LSTM to capture only critical temporal patterns
     - Single output for return predictions, compressed latent space for XGBoost features
     
@@ -96,35 +105,47 @@ def build_feature_lstm(input_shape, n_outputs, latent_dim=32, compressed_dim=10)
         LSTM(64, return_sequences=True, kernel_regularizer=L2(LstmConfig.REGULARIZATION_L2)),
         name='bilstm_1'
     )(inputs)
-    lstm_1 = Dropout(0.2)(lstm_1)
+    lstm_1 = Dropout(0.1)(lstm_1)  # Reduced from 0.2 to 0.1
     
     # Second bidirectional LSTM: refines patterns with hidden state extraction
     lstm_2 = Bidirectional(
         LSTM(latent_dim, return_sequences=False, kernel_regularizer=L2(LstmConfig.REGULARIZATION_L2)),
         name='bilstm_2_latent'
     )(lstm_1)
-    lstm_2_dropout = Dropout(0.2)(lstm_2)
+    lstm_2_dropout = Dropout(0.1)(lstm_2)  # Reduced from 0.2 to 0.1
     
     # BOTTLENECK COMPRESSION LAYER: Force LSTM to extract only critical patterns
     # Reduces 32-dim latent space to 10-dim compressed representation
-    # Tanh activation normalizes features to [-1, 1] range for stable XGBoost training
+    # LINEAR activation (no Tanh) to preserve variance and dynamic range
+    # Features will be standardized later with the rest of the features
     compressed_latent = Dense(
         compressed_dim, 
-        activation='tanh', 
+        activation='linear',  # Changed from 'tanh' to preserve variance
         name='bottleneck_compression',
         kernel_regularizer=L2(LstmConfig.REGULARIZATION_L2)
     )(lstm_2_dropout)
     
-    # Dense layer on top for predictions (uses full latent space)
-    x = Dense(32, activation='relu')(lstm_2_dropout)
-    outputs = Dense(n_outputs, name='return_predictions')(x)
+    # Dense layers for dual predictions
+    # Branch 1: Continuous returns (regression)
+    returns_branch = Dense(  32, activation='relu', name='returns_dense')(lstm_2_dropout)
+    returns_output = Dense(n_outputs, activation='linear', name='return_predictions')(returns_branch)
     
-    # Main model: single output for return predictions
-    model = Model(inputs=inputs, outputs=outputs, name='lstm_with_latent')
+    # Branch 2: Binary directions (classification) - NEW
+    # This forces latent space to capture directional patterns useful for XGBoost
+    direction_branch = Dense(32, activation='relu', name='direction_dense')(lstm_2_dropout)
+    direction_output = Dense(n_outputs, activation='sigmoid', name='direction_predictions')(direction_branch)
+    
+    # Main model: dual outputs (returns + directions)
+    model = Model(
+        inputs=inputs, 
+        outputs={'return_predictions': returns_output, 'direction_predictions': direction_output},
+        name='lstm_dual_task'
+    )
     model.compile(
         optimizer=Adam(learning_rate=0.001), 
-        loss='mse',
-        metrics=['mae']
+        loss={'return_predictions': 'mse', 'direction_predictions': 'binary_crossentropy'},
+        loss_weights={'return_predictions': 0.5, 'direction_predictions': 0.5},  # Equal weight
+        metrics={'return_predictions': ['mae'], 'direction_predictions': ['accuracy']}
     )
     
     # Auxiliary model: extracts full latent vector
@@ -144,13 +165,15 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
     Trains an LSTM on the input data and uses bottleneck-compressed latent features
     to generate refined features for XGBoost.
     
-    IMPROVEMENTS:
-    - Extracts latent vector (hidden state) that captures temporal patterns
+    IMPROVEMENTS V2 (Multi-task Learning):
+    - LSTM now learns BOTH continuous returns AND binary directions
+    - Dual-task training aligns latent space with classification objectives
+    - Extracts latent vector (hidden state) that captures directional temporal patterns
     - Applies bottleneck compression to reduce from 32 to 10 dimensions
-    - Tanh normalization ensures stable feature scaling
+    - Linear activation preserves variance for better feature importance
     - Only critical temporal patterns survive the compression, reducing noise
     """
-    print("🧠 --- LSTM Module: Generating Bottleneck-Compressed Latent Features --- 🧠")
+    print("🧠 --- LSTM Module: Dual-Task Learning (Returns + Directions) --- 🧠")
     
     # 1. Prepare data for LSTM
     df_lstm, feature_names = engineer_lstm_features(df)
@@ -166,8 +189,14 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(df_lstm)
     
-    targets = create_return_targets(df_lstm, LstmConfig.HORIZONS)
-    X, y = create_sequences(scaled_data, targets.values, LstmConfig.WINDOW_SIZE)
+    targets_df = create_return_targets(df_lstm, LstmConfig.HORIZONS)
+    X, y_all = create_sequences(scaled_data, targets_df.values, LstmConfig.WINDOW_SIZE)
+    
+    # Split targets into returns and directions
+    # y_all shape: (n_samples, 6) where 6 = 3 horizons * 2 (return + direction each)
+    n_horizons = len(LstmConfig.HORIZONS)
+    y_returns = y_all[:, :n_horizons]  # First 3 columns: returns
+    y_directions = y_all[:, n_horizons:]  # Last 3 columns: directions
 
     # Minimum 300 sequences required for stable LSTM training
     # With 300 sequences: 270 train (90% split), 30 validation (10% split)
@@ -184,7 +213,8 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
         return df
 
     # 2. Build and train LSTM with bottleneck compression
-    print(f"   Training LSTM with bottleneck compression on {len(X)} sequences...")
+    print(f"   Training LSTM with dual-task learning on {len(X)} sequences...")
+    print(f"   Tasks: (1) Returns regression (MSE) + (2) Direction classification (BCE)")
     print(f"   Architecture: Full latent dim={LstmConfig.LATENT_DIM} → Compressed dim={LstmConfig.COMPRESSED_LATENT_DIM}")
     
     model, latent_model, compressed_latent_model = build_feature_lstm(
@@ -214,14 +244,15 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
         print(f"   ⚠️ Using minimal validation split (5% with {len(X)} sequences)")
     
     model.fit(
-        X, y,  # Single target array matching the output shape
+        X, 
+        {'return_predictions': y_returns, 'direction_predictions': y_directions},
         epochs=LstmConfig.EPOCHS, 
         batch_size=min(LstmConfig.BATCH_SIZE, max(8, len(X)//10)),  # Batch size adaptive to data size
         validation_split=validation_split,
         callbacks=callbacks, 
         verbose=0
     )
-    print("   ✅ LSTM training completed.")
+    print("   ✅ LSTM training completed (dual-task: returns + directions).")
 
     # 3. Generate features for the entire dataset
     # Create sequences for all data points
@@ -239,7 +270,9 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
 
     # Get predictions and compressed latent vectors
     full_sequences_arr = np.array(full_sequences)
-    predicted_returns = model.predict(full_sequences_arr, verbose=0)
+    predictions_dict = model.predict(full_sequences_arr, verbose=0)
+    predicted_returns = predictions_dict['return_predictions']
+    predicted_directions = predictions_dict['direction_predictions']
     compressed_latent_vectors = compressed_latent_model.predict(full_sequences_arr, verbose=0)
     
     # 4. Map predictions back to the original dataframe
@@ -256,7 +289,7 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
         df[price_col_name] = df['close'] * (1 + df[return_col_name])
     
     # Add COMPRESSED latent vector features (10 dimensions instead of 32)
-    # These are normalized to [-1, 1] range via Tanh activation
+    # These preserve dynamic range via linear activation (will be standardized with other features)
     print("   Extracting compressed latent space features...")
     print(f"   Dimensionality reduction: {LstmConfig.LATENT_DIM}d → {LstmConfig.COMPRESSED_LATENT_DIM}d (noise filtering)")
     compressed_latent_dim = compressed_latent_vectors.shape[1]
@@ -270,6 +303,7 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
     df = df.bfill().ffill()
 
     print(f"   ✅ LSTM latent features generated: {compressed_latent_dim} dimensions (compressed)")
+    print(f"   ✅ Dual-task training: Returns (MSE) + Directions (Binary CE)")
     print(f"   ✅ Total LSTM features: {len(LstmConfig.HORIZONS)*2 + compressed_latent_dim} (returns + prices + compressed latent)")
-    print(f"   ✅ Improvement: Reduced from {LstmConfig.LATENT_DIM} to {compressed_latent_dim} features = {100*(1-compressed_latent_dim/LstmConfig.LATENT_DIM):.1f}% noise reduction")
+    print(f"   ✅ Noise reduction: {LstmConfig.LATENT_DIM}d → {compressed_latent_dim}d = {100*(1-compressed_latent_dim/LstmConfig.LATENT_DIM):.1f}% compression")
     return df

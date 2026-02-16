@@ -106,12 +106,14 @@ class VisualizationEngine:
 
         latent_cols = [col for col in df.columns if col.startswith('lstm_latent_')]
         if len(latent_cols) >= 3:
-            ax2.plot(df.index, df['lstm_latent_0'], label='Latent 0 (Trend)',
-                     color=self.colors['lstm'], linewidth=1.5, alpha=0.8)
-            ax2.plot(df.index, df['lstm_latent_1'], label='Latent 1 (Volatility)',
-                     color=self.colors['xgboost'], linewidth=1.5, alpha=0.8)
-            ax2.plot(df.index, df['lstm_latent_2'], label='Latent 2 (Regime)',
-                     color=self.colors['forecast'], linewidth=1.5, alpha=0.8)
+            # Dynamically use the first 3 available latent features
+            labels = ['Trend', 'Volatility', 'Regime', 'Momentum', 'Pattern']
+            colors_list = [self.colors['lstm'], self.colors['xgboost'], self.colors['forecast']]
+            
+            for i, latent_col in enumerate(latent_cols[:3]):
+                ax2.plot(df.index, df[latent_col], 
+                        label=f'Latent {i} ({labels[i]})',
+                        color=colors_list[i], linewidth=1.5, alpha=0.8)
 
             ax2.axvspan(test_idx_all[0], test_idx_all[-1], alpha=0.1, color='gray')
             ax2.set_title('LSTM Latent Features (Top 3)', fontsize=12, fontweight='bold')
@@ -240,9 +242,9 @@ class VisualizationEngine:
             avg_return = 0.001
             volatility = 0.01
         
-        # Calculate targets: Profit Target +1.50%, Stop Loss -0.75%
+        # Calculate targets: SYMMETRIC +1.50%, -1.50% for balanced class distribution
         profit_target = last_price * 1.015
-        stop_loss = last_price * 0.9925
+        stop_loss = last_price * 0.985
         
         # Generate forecast with directional bias from model prediction
         forecast_prices = []
@@ -306,7 +308,7 @@ class VisualizationEngine:
         ax1.axhline(profit_target, color='green', linestyle='--', linewidth=2.5, 
                    alpha=0.8, label=f'Profit Target: +1.50% (${profit_target:.2f})', zorder=2)
         ax1.axhline(stop_loss, color='red', linestyle='--', linewidth=2.5, 
-                   alpha=0.8, label=f'Stop Loss: -0.75% (${stop_loss:.2f})', zorder=2)
+                   alpha=0.8, label=f'Stop Loss: -1.50% (${stop_loss:.2f})', zorder=2)
         ax1.axhline(last_price, color='blue', linestyle=':', linewidth=1.5, 
                    alpha=0.6, label=f'Entry Price: ${last_price:.2f}', zorder=1)
         
@@ -382,7 +384,7 @@ class VisualizationEngine:
             action = "SELL/AVOID"
             action_symbol = "v"  # Down arrow
             action_color = 'darkred'
-            reason = f"High loss risk ({(1-latest_prob)*100:.1f}%)\nRisk: ${stop_loss:.2f} (-0.75%)"
+            reason = f"High loss risk ({(1-latest_prob)*100:.1f}%)\nRisk: ${stop_loss:.2f} (-1.50%)"
         else:
             action = "HOLD/WAIT"
             action_symbol = "-"  # Dash
@@ -425,7 +427,7 @@ class VisualizationEngine:
         ax_zoom.axhline(profit_target, color='green', linestyle='--', linewidth=2, 
                        alpha=0.8, label=f'Target: ${profit_target:.2f} (+1.50%)')
         ax_zoom.axhline(stop_loss, color='red', linestyle='--', linewidth=2, 
-                       alpha=0.8, label=f'Stop: ${stop_loss:.2f} (-0.75%)')
+                       alpha=0.8, label=f'Stop: ${stop_loss:.2f} (-1.50%)')
         
         # Confidence
         ax_zoom.fill_between(forecast_dates, lower_conf, upper_conf,
