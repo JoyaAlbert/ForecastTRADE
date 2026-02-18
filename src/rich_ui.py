@@ -18,10 +18,60 @@ from rich.layout import Layout
 from rich.columns import Columns
 from rich import box
 from datetime import datetime
+import json
 import sys
 
 # Initialize Rich console
 console = Console()
+
+
+class TradingRecommendation:
+    """Encapsulates volatility-adjusted recommendation levels and config payload."""
+
+    def __init__(self, probability, entry_price, profit_target, stop_loss, dynamic_risk_config=None):
+        self.probability = probability
+        self.entry_price = entry_price
+        self.profit_target = profit_target
+        self.stop_loss = stop_loss
+        self.dynamic_risk_config = dynamic_risk_config or {
+            "dynamic_risk": {
+                "type": "Volatility_Adjusted",
+                "params": {
+                    "k_tp": 2.5,
+                    "k_sl": 1.25,
+                    "vol_metric": "rolling_std_20d"
+                }
+            }
+        }
+
+    def target_pct(self):
+        return ((self.profit_target - self.entry_price) / self.entry_price) * 100 if self.entry_price else 0.0
+
+    def stop_pct(self):
+        return ((self.stop_loss - self.entry_price) / self.entry_price) * 100 if self.entry_price else 0.0
+
+    def to_dict(self):
+        payload = {
+            "entry": self.entry_price,
+            "profit_target": self.profit_target,
+            "stop_loss": self.stop_loss,
+            "probability": self.probability,
+            **self.dynamic_risk_config
+        }
+        return self._to_json_safe(payload)
+
+    @staticmethod
+    def _to_json_safe(value):
+        if isinstance(value, dict):
+            return {k: TradingRecommendation._to_json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [TradingRecommendation._to_json_safe(v) for v in value]
+        if hasattr(value, 'item'):
+            try:
+                return value.item()
+            except Exception:
+                pass
+        return value
 
 class RichUI:
     """Main class for Rich UI interactions"""
@@ -179,22 +229,23 @@ class RichUI:
         self.console.print(title)
         
         # Create a simple progress visualization
-        stages = [
-            ("Momentum Indicators", 0.15),
-            ("Volatility Indicators", 0.30),
-            ("Trend Indicators", 0.45),
-            ("Volume Indicators", 0.60),
-            ("Price Patterns", 0.75),
-            ("Macro Indicators", 0.85),
-            ("Regime Indicators", 1.0),
-        ]
+        # stages = [
+        #     ("Momentum Indicators", 0.15),
+        #     ("Volatility Indicators", 0.30),
+        #     ("Trend Indicators", 0.45),
+        #     ("Volume Indicators", 0.60),
+        #     ("Price Patterns", 0.75),
+        #     ("Macro Indicators", 0.85),
+        #     ("Regime Indicators", 1.0),
+        # ]
         
-        for stage, progress in stages:
-            bar = "█" * int(progress * 30) + "░" * int((1 - progress) * 30)
-            pct = int(progress * 100)
-            msg = f"[bright_cyan]{stage:<25}[/bright_cyan] [bright_white]|{bar}|[/bright_white] [bright_green]{pct:3d}%[/bright_green]"
-            self.console.print(msg)
+        # for stage, progress in stages:
+        #     bar = "█" * int(progress * 30) + "░" * int((1 - progress) * 30)
+        #     pct = int(progress * 100)
+        #     msg = f"[bright_cyan]{stage:<25}[/bright_cyan] [bright_white]|{bar}|[/bright_white] [bright_green]{pct:3d}%[/bright_green]"
+        #     self.console.print(msg)
         
+        self.console.print("[dim]Processing technical indicators...[/dim]")
         self.console.print()
         summary = Text()
         summary.append(f"✅ Total features created: ", style="bright_green")
@@ -360,8 +411,15 @@ class RichUI:
         self.console.print(table)
         self.console.print()
     
-    def show_recommendation(self, probability, last_price, profit_target, stop_loss, date_str):
+    def show_recommendation(self, probability, last_price, profit_target, stop_loss, date_str, dynamic_risk_config=None):
         """Display final trading recommendation with emoji and styling"""
+        rec = TradingRecommendation(
+            probability=probability,
+            entry_price=last_price,
+            profit_target=profit_target,
+            stop_loss=stop_loss,
+            dynamic_risk_config=dynamic_risk_config
+        )
         
         # Determine recommendation
         if probability > 0.65:
@@ -393,9 +451,13 @@ class RichUI:
         
         panel_content.append("Target Levels:\n", style="bright_cyan")
         panel_content.append(f"  🎯 Profit Target: ${profit_target:.2f} ", style="white")
-        panel_content.append(f"(+1.50%)\n", style="bright_green")
+        panel_content.append(f"({rec.target_pct():+.2f}%)\n", style="bright_green")
         panel_content.append(f"  🛑 Stop Loss:     ${stop_loss:.2f} ", style="white")
-        panel_content.append(f"(-1.50%)\n\n", style="bright_red")
+        panel_content.append(f"({rec.stop_pct():+.2f}%)\n\n", style="bright_red")
+
+        panel_content.append("Dynamic Risk Config:\n", style="bright_cyan")
+        panel_content.append(json.dumps(rec.dynamic_risk_config, indent=2), style="white")
+        panel_content.append("\n\n", style="white")
         
         panel_content.append("Forecast:\n", style="bright_cyan")
         panel_content.append(f"  📊 Win Probability: ", style="white")
@@ -419,6 +481,10 @@ class RichUI:
         )
         
         self.console.print(panel)
+        self.console.print()
+
+        self.console.print("[dim]Recommendation payload:[/dim]")
+        self.console.print(json.dumps(rec.to_dict(), indent=2), style="dim")
         self.console.print()
         
         # Return recommendation text

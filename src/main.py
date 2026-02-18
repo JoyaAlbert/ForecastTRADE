@@ -14,6 +14,9 @@ The pipeline covers data fetching, feature engineering, preprocessing, and
 model training with time-series cross-validation.
 """
 
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logs
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -57,6 +60,13 @@ class Config:
     EMA_SHORT_PERIOD = 20
     EMA_LONG_PERIOD = 50
 
+    # Dynamic Risk / Labeling Parameters (Asset-Agnostic)
+    DYNAMIC_RISK_TYPE = "Volatility_Adjusted"
+    DYNAMIC_RISK_K_TP = 2.5
+    DYNAMIC_RISK_K_SL = 1.25
+    DYNAMIC_RISK_VOL_METRIC = "rolling_std_20d"  # Options: rolling_std_20d, atr_14d
+    ESTIMATED_TRANSACTION_COST = 0.0020  # 0.20% per trade (estimated)
+
     # Model Parameters (optimized for PERCENTILE LABELING + balanced classes)
     XGB_PARAMS = {
         'objective': 'binary:logistic',
@@ -79,17 +89,17 @@ class Config:
 
     # Time-Series Cross-Validation Parameters
     N_SPLITS = 12  # 12 time-series splits for comprehensive validation
-    EMBARGO_DAYS = 2  # 2-day embargo prevents lookahead, maintains data quality (Run 6 optimized)
+    EMBARGO_DAYS = 20  # Increased to 20 days to match prediction horizon (prevents overlap leakage)
     MIN_TRAIN_SIZE = 252  # 252 trading days (~1 year) minimum
     
     # Walk-Forward Refinement: Sliding Window Configuration
     # Instead of expanding window (old data + new data), use fixed-size sliding window
     # This makes model adapt faster to market regime changes
     USE_SLIDING_WINDOW = True  # Enable adaptive sliding window strategy
-    SLIDING_WINDOW_SIZE = 400  # 400 days window (~1.5 years, reduced for percentile labeling)
-    VALIDATION_WINDOW_SIZE = 60  # 60 trading days for validation (~3 months)
-    # Benefit: Model forgets stale patterns, adapts to market regime changes
-    # Note: Reduced from 750/90 to accommodate 750 total samples after HOLD label removal
+    SLIDING_WINDOW_SIZE = 400  # 400 days window (~1.5 years)
+    VALIDATION_WINDOW_SIZE = 120  # Increased to 120 days (~6 months) for statistically significant validation
+    # Benefit: Model returns are more realistic and less prone to "lucky" small sample sizes
+    # Note: Requires more data but yields robust metrics
     
     # Probability Threshold Parameters
     PROBABILITY_THRESHOLD_BUY = 0.65  # Only buy if prob > 65% (baseline)
@@ -99,9 +109,30 @@ class Config:
     THRESHOLD_MIN_RECALL = 0.25  # Used for precision_at_recall
     THRESHOLD_MIN_PRECISION = 0.25  # Used for recall_at_precision (future)
     
+    # NEW: Sharpe-Optimized Threshold System
+    OPTIMIZE_BY_SHARPE = True  # Optimize thresholds by Sharpe Ratio (better than F1)
+    USE_ADAPTIVE_THRESHOLDS = True  # Use volatility-adaptive thresholds
+    ADAPTIVE_THRESHOLD_MAX_SHIFT = 0.04  # Smoothed max shift (±4%, reduced from implicit ±10%)
+    ADAPTIVE_THRESHOLD_SMOOTHING_ALPHA = 0.35  # EMA smoothing across folds (lower = smoother)
+    ADAPTIVE_THRESHOLD_ZSCORE_CLIP = 2.5  # Cap extreme volatility impact
+
+    # Stability-Oriented Hyperparameter Tuning
+    ENABLE_STABILITY_TUNING = True  # Lightweight fold-level tuning for robust performance
+    TUNE_ON_FIRST_VALID_FOLD_ONLY = True  # Tune once, reuse for remaining folds (faster + stabler)
+    STABILITY_TUNING_MAX_CANDIDATES = 8
+    STABILITY_TUNING_MIN_TRADES = 8
+    
     # Position Opening Strategy
     POSITION_OPENING_MODE = "hybrid"  # Options: "threshold" (simple), "percentile" (top X%), "hybrid" (smart)
     PERCENTILE_THRESHOLD = 60  # For percentile/hybrid mode: keep top X% of predictions (60=top 40%)
+    ENABLE_POSITION_SIZING = True  # Dynamic exposure sizing by confidence/regime
+    POSITION_SIZE_MIN_CONFIDENCE = 0.55  # Below this, skip trade even if threshold passes
+    POSITION_SIZE_UNCERTAINTY_BAND = 0.08  # Skip trades near 50% probability
+    POSITION_SIZE_VOL_RISK_PENALTY = 0.35  # Exposure reduction in high-vol regimes
+    POSITION_SIZE_MAX = 1.0
+    ENABLE_REGIME_HARD_GATE = True  # Block all long entries in hostile regime
+    HARD_GATE_VOL_ZSCORE = 1.20  # High-volatility cutoff
+    HARD_GATE_BEARISH_MA200_RATIO = 0.60  # If >60% samples are >2% below MA200
     # Modes explained:
     #   - "threshold": Classic approach - buy if proba >= threshold
     #   - "percentile": Aggressive filtering - only trade top X% most confident predictions
@@ -492,6 +523,8 @@ def filter_low_importance_features(df, known_low_importance=None):
         'regime_change',  # Too noisy
         'vix_change',  # Redundant with close_vix_ratio
         'volume_roc_10',  # Redundant with volume_ma_ratio
+        'volume_ratio',  # Often noisy in crypto/stocks
+        'regime_change', # Identified as low importance
     ]
     
     # Merge with any provided low-importance features
@@ -516,76 +549,120 @@ def filter_low_importance_features(df, known_low_importance=None):
 # --- 4. TARGET DEFINITION ---
 def define_target(df):
     """
-    Defines target using PERCENTILE-BASED LABELING for guaranteed class balance.
+    Defines target using TRIPLE BARRIER METHOD (Volatility-Based).
     
-    Instead of fixed barriers (Triple Barrier), uses quantile-based classification:
-    - Calculate 20-day forward returns
-    - Bottom 30%: SELL (label=0) - worst performers
-    - Top 30%: BUY (label=1) - best performers  
-    - Middle 40%: HOLD (discarded) - neutral, no clear signal
+    This eliminates look-ahead bias by using ONLY past volatility to define targets.
+    - Dynamic Profit Target: Entry + (Volatility * K_TP)
+    - Dynamic Stop Loss: Entry - (Volatility * K_SL)
+    - Time Horizon: 20 days
     
-    This guarantees 30/30 balance regardless of market regime (bull/bear).
+    Labels:
+    - 1 (BUY): Price hit Profit Target first
+    - 0 (SELL): Price hit Stop Loss first
+    - NaN (HOLD): Neither hit within 20 days (or timed out)
     
     Args:
         df (pd.DataFrame): DataFrame with 'close' price
         
     Returns:
-        pd.DataFrame: DataFrame with 'target' column (0=SELL, 1=BUY, NaN=HOLD)
+        pd.DataFrame: DataFrame with 'target' column
     """
-    print("\n📊 Defining target with Percentile-Based Labeling...")
+    print("\n📊 Defining target with Triple Barrier Method (No Leakage)...")
+
+    # 1. DYNAMIC VOLATILITY REFERENCE
+    if Config.DYNAMIC_RISK_VOL_METRIC == 'atr_14d' and 'atr' in df.columns:
+        vol_series = pd.to_numeric(df['atr'], errors='coerce')
+        vol_metric_used = 'atr_14d'
+    elif 'volatility_20' in df.columns:
+        vol_series = pd.to_numeric(df['volatility_20'], errors='coerce')
+        vol_metric_used = 'rolling_std_20d'
+    else:
+        vol_series = pd.to_numeric(df['close'], errors='coerce').rolling(window=20).std()
+        vol_metric_used = 'rolling_std_20d'
+
+    vol_series = vol_series.fillna(method='ffill').fillna(method='bfill')
     
-    # 1. CALCULATE FORWARD RETURNS (20 days)
-    forward_horizon = 20  # Trading days (~1 month)
-    df['forward_return_20d'] = df['close'].pct_change(periods=forward_horizon).shift(-forward_horizon)
+    # 2. CALCULATE BARRIERS FOR EACH TIMESTAMP
+    # Note: These are "theoretical" barriers if we entered at this timestamp
+    df['barrier_up'] = df['close'] + (vol_series * 2.0)  # slightly tighter for labeling than trading (2.0 vs 2.5)
+    df['barrier_down'] = df['close'] - (vol_series * 1.5) # slightly tighter for labeling (1.5 vs 1.25)
     
-    # 2. PERCENTILE-BASED CLASSIFICATION
-    # Calculate percentile thresholds (35th and 65th percentiles)
-    # OPTIMIZED: 35/35/30 split instead of 30/30/40 for more training data
-    percentile_bottom = 35  # Bottom 35% = SELL (was 30%)
-    percentile_top = 65     # Top 35% = BUY (was 70%)
-    # Middle 30% = HOLD (discarded, was 40%)
+    # K_TP=2.0, K_SL=1.5 gives a good Risk:Reward ratio for labeling
+    # We want to find clear trends, not just noise
     
-    threshold_sell = df['forward_return_20d'].quantile(percentile_bottom / 100)
-    threshold_buy = df['forward_return_20d'].quantile(percentile_top / 100)
+    print(f"   Triple Barrier Config: Volatility={vol_metric_used} | TP=2.0x | SL=1.5x | Horizon=20d")
+
+    # 3. VECTORIZED BARRIER TOUCH DETECTION
+    # We need to look forward 20 days to see what was hit first
+    horizon = 20
     
-    print(f"   Forward return horizon: {forward_horizon} days")
-    print(f"   SELL threshold (bottom {percentile_bottom}%): {threshold_sell*100:.2f}%")
-    print(f"   BUY threshold (top {percentile_top}%): {threshold_buy*100:.2f}%")
+    # Use numpy for speed
+    closes = df['close'].values
+    highs = df['high'].values if 'high' in df.columns else closes
+    lows = df['low'].values if 'low' in df.columns else closes
+    ups = df['barrier_up'].values
+    downs = df['barrier_down'].values
     
-    # 3. APPLY LABELS
-    # Initialize with NaN (HOLD - will be dropped later)
-    df['target'] = np.nan
+    labels = np.full(len(df), np.nan) # Default to NaN (HOLD/TIMEOUT)
     
-    # Bottom 35%: SELL (0)
-    sell_mask = df['forward_return_20d'] <= threshold_sell
-    df.loc[sell_mask, 'target'] = 0
+    # Iterate through potential entry points
+    # (Vectorization is hard for "first touch" logic, loop is safer for correctness here)
+    # We stop at len(df) - horizon to avoid index errors
     
-    # Top 35%: BUY (1)
-    buy_mask = df['forward_return_20d'] >= threshold_buy
-    df.loc[buy_mask, 'target'] = 1
+    hits_up = 0
+    hits_down = 0
+    timeouts = 0
     
-    # Middle 30%: remains NaN (HOLD - discarded)
+    for i in range(len(df) - horizon):
+        entry_price = closes[i]
+        barrier_up = ups[i]
+        barrier_down = downs[i]
+        
+        # Look at window [i+1 : i+1+horizon]
+        window_highs = highs[i+1 : i+1+horizon]
+        window_lows = lows[i+1 : i+1+horizon]
+        
+        # Check touches
+        # Find indices where barriers are breached
+        up_touches = np.where(window_highs >= barrier_up)[0]
+        down_touches = np.where(window_lows <= barrier_down)[0]
+        
+        first_up = up_touches[0] if len(up_touches) > 0 else 9999
+        first_down = down_touches[0] if len(down_touches) > 0 else 9999
+        
+        if first_up == 9999 and first_down == 9999:
+            # Timeout (neither hit)
+            labels[i] = np.nan
+            timeouts += 1
+        elif first_up < first_down:
+            # Hit profit target first
+            labels[i] = 1.0 # BUY
+            hits_up += 1
+        elif first_down < first_up:
+            # Hit stop loss first
+            labels[i] = 0.0 # SELL
+            hits_down += 1
+        else:
+            # Simultaneous touch (rare, assume stop loss for safety)
+            labels[i] = 0.0
+            hits_down += 1
+            
+    df['target'] = labels
     
-    # 4. Print label distribution using Rich UI
-    sell_count = sell_mask.sum()
-    buy_count = buy_mask.sum()
-    hold_count = (~sell_mask & ~buy_mask).sum()
-    total_valid = len(df) - df['forward_return_20d'].isna().sum()
-    
-    labels_dist = [
-        ("SELL (Bottom 35%)", sell_count, 100 * sell_count / total_valid if total_valid > 0 else 0),
-        ("BUY (Top 35%)", buy_count, 100 * buy_count / total_valid if total_valid > 0 else 0),
-        ("HOLD (Discarded)", hold_count, 100 * hold_count / total_valid if total_valid > 0 else 0),
-    ]
-    
-    ui.show_percentile_labeling_info(
-        forward_horizon, 
-        percentile_bottom, 
-        percentile_top,
-        threshold_sell,
-        threshold_buy,
-        labels_dist
-    )
+    # 4. REPORT DISTRIBUTION
+    total_labeled = hits_up + hits_down + timeouts
+    if total_labeled > 0:
+        print(f"   Label Distribution:")
+        print(f"      BUY  (Hit TP): {hits_up} ({hits_up/total_labeled*100:.1f}%)")
+        print(f"      SELL (Hit SL): {hits_down} ({hits_down/total_labeled*100:.1f}%)")
+        print(f"      HOLD (Timeout): {timeouts} ({timeouts/total_labeled*100:.1f}%)")
+        print(f"      (HOLD samples will be dropped from training)")
+
+    # Dynamic risk metadata for downstream recommendation modules
+    df['dynamic_risk_type'] = Config.DYNAMIC_RISK_TYPE
+    df['dynamic_risk_k_tp'] = Config.DYNAMIC_RISK_K_TP
+    df['dynamic_risk_k_sl'] = Config.DYNAMIC_RISK_K_SL
+    df['dynamic_risk_vol_metric'] = vol_metric_used
     
     return df
 
@@ -805,6 +882,333 @@ def find_optimal_threshold(y_true, proba_preds, metric="f1", min_recall=0.25, mi
         "f1": float(f1_scores[idx])
     }
 
+
+def find_optimal_threshold_sharpe(y_true, proba_preds, returns, min_samples=10):
+    """
+    Find optimal probability threshold that MAXIMIZES SHARPE RATIO.
+    
+    This is superior to F1 optimization because it directly optimizes
+    for risk-adjusted returns, which is what trading performance measures.
+    
+    Args:
+        y_true (np.array): True labels (1=win, 0=loss)
+        proba_preds (np.array): Predicted probabilities for class 1
+        returns (np.array): Actual forward returns for each sample
+        min_samples (int): Minimum trades required to calculate Sharpe
+    
+    Returns:
+        tuple: (threshold_buy, threshold_sell, stats dict)
+    """
+    # Grid search over threshold space
+    threshold_buy_range = np.arange(0.45, 0.80, 0.05)  # More granular: 45% to 75%
+    threshold_sell_range = np.arange(0.25, 0.50, 0.05)  # 25% to 45%
+    
+    best_sharpe = -np.inf
+    best_threshold_buy = 0.65
+    best_threshold_sell = 0.35
+    best_stats = {}
+    
+    for th_buy in threshold_buy_range:
+        for th_sell in threshold_sell_range:
+            # Only process if buy > sell
+            if th_buy <= th_sell:
+                continue
+            
+            # Create binary predictions
+            preds = np.zeros(len(proba_preds))
+            preds[proba_preds >= th_buy] = 1
+            preds[proba_preds <= th_sell] = -1  # Sell signal
+            
+            # Calculate returns for trades taken
+            trade_mask = preds != 0
+            if trade_mask.sum() < min_samples:
+                continue
+            
+            trade_returns = returns[trade_mask]
+            
+            # Calculate Sharpe Ratio
+            if len(trade_returns) > 0 and trade_returns.std() > 0:
+                sharpe = trade_returns.mean() / trade_returns.std() * np.sqrt(252)
+            else:
+                sharpe = 0
+            
+            # Track best
+            if sharpe > best_sharpe:
+                best_sharpe = sharpe
+                best_threshold_buy = th_buy
+                best_threshold_sell = th_sell
+                
+                # Calculate additional stats
+                win_rate = (trade_returns > 0).sum() / len(trade_returns) if len(trade_returns) > 0 else 0
+                avg_return = trade_returns.mean() if len(trade_returns) > 0 else 0
+                
+                best_stats = {
+                    'sharpe': float(sharpe),
+                    'n_trades': int(trade_mask.sum()),
+                    'win_rate': float(win_rate),
+                    'avg_return': float(avg_return),
+                    'threshold_buy': float(th_buy),
+                    'threshold_sell': float(th_sell)
+                }
+    
+    return best_threshold_buy, best_threshold_sell, best_stats
+
+
+def get_adaptive_thresholds(volatility_zscore, base_buy=0.65, base_sell=0.35):
+    """
+    Calculate adaptive thresholds based on market volatility regime.
+    
+    During high volatility → Higher thresholds (more conservative)
+    During low volatility → Lower thresholds (more aggressive)
+    
+    Args:
+        volatility_zscore (float): Z-score of current volatility vs historical
+                                  >1 = high vol, <-1 = low vol, ~0 = normal
+        base_buy (float): Base buy threshold
+        base_sell (float): Base sell threshold
+    
+    Returns:
+        tuple: (adaptive_buy, adaptive_sell)
+    """
+    # Smooth nonlinear adjustment factor based on volatility.
+    # Uses tanh to avoid abrupt jumps and caps to ±4% by default.
+    z = np.clip(volatility_zscore, -Config.ADAPTIVE_THRESHOLD_ZSCORE_CLIP, Config.ADAPTIVE_THRESHOLD_ZSCORE_CLIP)
+    adjustment = np.tanh(z / 1.5) * Config.ADAPTIVE_THRESHOLD_MAX_SHIFT
+    
+    adaptive_buy = np.clip(base_buy + adjustment, 0.50, 0.85)
+    adaptive_sell = np.clip(base_sell - adjustment, 0.15, 0.45)
+    
+    return adaptive_buy, adaptive_sell
+
+
+def smooth_thresholds(current_buy, current_sell, prev_buy, prev_sell, alpha=0.35):
+    """EMA smoothing for fold-to-fold threshold stability."""
+    alpha = float(np.clip(alpha, 0.05, 1.0))
+    smoothed_buy = alpha * current_buy + (1 - alpha) * prev_buy
+    smoothed_sell = alpha * current_sell + (1 - alpha) * prev_sell
+    return float(smoothed_buy), float(smoothed_sell)
+
+
+def compute_position_sizes(proba_preds, threshold_buy, volatility_zscore=0.0, eligible_mask=None):
+    """
+    Confidence- and regime-aware position sizing.
+
+    Rules:
+    - Skip uncertain signals near 50% probability.
+    - Skip low-confidence buys below minimum confidence.
+    - Reduce size during high-volatility regimes.
+    """
+    proba_preds = np.asarray(proba_preds)
+    sizes = np.zeros_like(proba_preds, dtype=float)
+
+    if eligible_mask is None:
+        buy_mask = proba_preds >= threshold_buy
+    else:
+        buy_mask = np.asarray(eligible_mask).astype(bool)
+    if not np.any(buy_mask):
+        stats = {
+            'n_candidates': 0,
+            'n_skipped_uncertain': 0,
+            'n_skipped_low_conf': 0,
+            'n_sized': 0,
+            'avg_size': 0.0
+        }
+        return sizes, stats
+
+    p_buy = proba_preds[buy_mask]
+
+    confidence_component = np.clip(
+        (p_buy - threshold_buy) / (1 - threshold_buy + 1e-9),
+        0,
+        1
+    )
+
+    center_distance = np.abs(p_buy - 0.5)
+    uncertain = center_distance < Config.POSITION_SIZE_UNCERTAINTY_BAND
+    low_conf = p_buy < Config.POSITION_SIZE_MIN_CONFIDENCE
+
+    # Volatility risk multiplier (smaller size in high-volatility regimes)
+    vol_penalty = max(0.0, volatility_zscore)
+    vol_multiplier = float(np.clip(1.0 - Config.POSITION_SIZE_VOL_RISK_PENALTY * (vol_penalty / 2.0), 0.35, 1.0))
+
+    base_size = confidence_component * vol_multiplier
+    base_size[uncertain | low_conf] = 0.0
+    base_size = np.clip(base_size, 0.0, Config.POSITION_SIZE_MAX)
+
+    sizes[buy_mask] = base_size
+
+    non_zero = sizes[sizes > 0]
+    stats = {
+        'n_candidates': int(buy_mask.sum()),
+        'n_skipped_uncertain': int(uncertain.sum()),
+        'n_skipped_low_conf': int(low_conf.sum()),
+        'n_sized': int((sizes > 0).sum()),
+        'avg_size': float(non_zero.mean()) if len(non_zero) > 0 else 0.0
+    }
+    return sizes, stats
+
+
+def diagnose_fold_market_conditions(fold_idx, X_train_unscaled, X_val_unscaled, y_val, proba_preds, preds_thresholded, position_sizes):
+    """Diagnose market regime conditions behind weak/no-trade fold outcomes."""
+    diagnostics = {}
+
+    # Class regime
+    class_dist = y_val.value_counts(normalize=True).to_dict()
+    diagnostics['val_class_dist'] = {int(k): float(v) for k, v in class_dist.items()}
+
+    # Volatility regime relative to training window (critical fix: no self-centering)
+    if 'volatility_20' in X_train_unscaled.columns and 'volatility_20' in X_val_unscaled.columns:
+        train_vol = X_train_unscaled['volatility_20'].values
+        val_vol = X_val_unscaled['volatility_20'].values
+        vol_mean = np.nanmean(train_vol)
+        vol_std = np.nanstd(train_vol) + 1e-9
+        val_vol_z = (val_vol - vol_mean) / vol_std
+        diagnostics['val_vol_zscore_mean'] = float(np.nanmean(val_vol_z))
+        diagnostics['val_vol_zscore_std'] = float(np.nanstd(val_vol_z))
+    else:
+        diagnostics['val_vol_zscore_mean'] = np.nan
+        diagnostics['val_vol_zscore_std'] = np.nan
+
+    # Trend regime
+    if 'distance_to_ma200' in X_val_unscaled.columns:
+        dist_ma = X_val_unscaled['distance_to_ma200'].values
+        diagnostics['distance_to_ma200_mean'] = float(np.nanmean(dist_ma))
+        diagnostics['pct_below_ma200_gt_2pct'] = float(np.mean(dist_ma < -0.02))
+
+    # Signal confidence concentration
+    mid_zone = (proba_preds >= 0.45) & (proba_preds <= 0.55)
+    diagnostics['signal_midzone_ratio'] = float(np.mean(mid_zone))
+    diagnostics['mean_probability'] = float(np.mean(proba_preds))
+    diagnostics['std_probability'] = float(np.std(proba_preds))
+
+    # Tradeability / sizing behavior
+    n_opened = int(np.sum(preds_thresholded == 1))
+    n_sized = int(np.sum(position_sizes > 0))
+    diagnostics['opened_positions'] = n_opened
+    diagnostics['sized_positions'] = n_sized
+
+    is_problematic = (n_opened > 0 and n_sized == 0) or (n_sized == 0) or (fold_idx in (6, 7))
+    if is_problematic:
+        pass
+        # print(f"   🔍 Fold {fold_idx} Regime Diagnostics:")
+        # print(f"      • Validation class balance: {diagnostics['val_class_dist']}")
+        # print(f"      • Volatility regime (z): mean={diagnostics['val_vol_zscore_mean']:.2f}, std={diagnostics['val_vol_zscore_std']:.2f}")
+        # if 'distance_to_ma200_mean' in diagnostics:
+        #     print(f"      • Trend regime: mean distance_to_ma200={diagnostics['distance_to_ma200_mean']:.3f}, below MA200>2%={diagnostics['pct_below_ma200_gt_2pct']:.1%}")
+        # print(f"      • Signal concentration (0.45-0.55): {diagnostics['signal_midzone_ratio']:.1%}")
+        # print(f"      • Positions opened={n_opened}, sized={n_sized}")
+
+    return diagnostics
+
+
+def apply_regime_hard_gate(preds_thresholded, X_val_unscaled, avg_vol_zscore):
+    """Apply fold-level hard gate to skip trades in hostile market regimes."""
+    gated = preds_thresholded.copy()
+    gate_active = False
+    gate_reason = ""
+
+    bearish_ratio = 0.0
+    if 'distance_to_ma200' in X_val_unscaled.columns:
+        bearish_ratio = float(np.mean(X_val_unscaled['distance_to_ma200'].values < -0.02))
+
+    if (
+        Config.ENABLE_REGIME_HARD_GATE
+        and avg_vol_zscore >= Config.HARD_GATE_VOL_ZSCORE
+        and bearish_ratio >= Config.HARD_GATE_BEARISH_MA200_RATIO
+    ):
+        gate_active = True
+        gated[:] = 0
+        gate_reason = (
+            f"vol_z={avg_vol_zscore:.2f} >= {Config.HARD_GATE_VOL_ZSCORE:.2f} "
+            f"and bearish_ma200_ratio={bearish_ratio:.1%} >= {Config.HARD_GATE_BEARISH_MA200_RATIO:.1%}"
+        )
+
+    return gated, gate_active, gate_reason
+
+
+def tune_xgb_params_for_stability(
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    val_returns,
+    base_params,
+    scale_pos_weight,
+):
+    """
+    Lightweight hyperparameter tuning focused on fold stability.
+
+    Objective combines AUCPR, AUC, Sharpe, and minimum trade activity,
+    favoring robust behavior over peak single-metric performance.
+    """
+    candidates = [
+        {'max_depth': 4, 'learning_rate': 0.03, 'n_estimators': 450, 'subsample': 0.80, 'colsample_bytree': 0.80, 'min_child_weight': 3, 'gamma': 0.30, 'reg_alpha': 0.25, 'reg_lambda': 1.10},
+        {'max_depth': 5, 'learning_rate': 0.025, 'n_estimators': 500, 'subsample': 0.82, 'colsample_bytree': 0.82, 'min_child_weight': 3, 'gamma': 0.25, 'reg_alpha': 0.20, 'reg_lambda': 1.00},
+        {'max_depth': 6, 'learning_rate': 0.02, 'n_estimators': 600, 'subsample': 0.85, 'colsample_bytree': 0.85, 'min_child_weight': 2, 'gamma': 0.20, 'reg_alpha': 0.20, 'reg_lambda': 1.00},
+        {'max_depth': 4, 'learning_rate': 0.02, 'n_estimators': 700, 'subsample': 0.88, 'colsample_bytree': 0.86, 'min_child_weight': 4, 'gamma': 0.35, 'reg_alpha': 0.30, 'reg_lambda': 1.20},
+        {'max_depth': 5, 'learning_rate': 0.018, 'n_estimators': 750, 'subsample': 0.84, 'colsample_bytree': 0.84, 'min_child_weight': 2, 'gamma': 0.22, 'reg_alpha': 0.22, 'reg_lambda': 1.05},
+        {'max_depth': 3, 'learning_rate': 0.035, 'n_estimators': 400, 'subsample': 0.78, 'colsample_bytree': 0.78, 'min_child_weight': 5, 'gamma': 0.40, 'reg_alpha': 0.35, 'reg_lambda': 1.30},
+        {'max_depth': 6, 'learning_rate': 0.015, 'n_estimators': 900, 'subsample': 0.80, 'colsample_bytree': 0.80, 'min_child_weight': 3, 'gamma': 0.28, 'reg_alpha': 0.28, 'reg_lambda': 1.15},
+        {'max_depth': 5, 'learning_rate': 0.03, 'n_estimators': 450, 'subsample': 0.90, 'colsample_bytree': 0.88, 'min_child_weight': 2, 'gamma': 0.18, 'reg_alpha': 0.15, 'reg_lambda': 0.95},
+    ]
+    candidates = candidates[:Config.STABILITY_TUNING_MAX_CANDIDATES]
+
+    best_score = -np.inf
+    best_params = None
+    best_meta = {}
+
+    for candidate in candidates:
+        params = base_params.copy()
+        params.update(candidate)
+        params['scale_pos_weight'] = scale_pos_weight
+
+        model = xgb.XGBClassifier(**params)
+        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+
+        proba = model.predict_proba(X_val)[:, 1]
+        auc = roc_auc_score(y_val, proba)
+        aucpr = average_precision_score(y_val, proba)
+
+        th_buy, th_sell, th_stats = find_optimal_threshold_sharpe(
+            y_val.values,
+            proba,
+            val_returns,
+            min_samples=Config.STABILITY_TUNING_MIN_TRADES
+        )
+        preds = apply_probability_threshold(proba, th_buy, th_sell, mode='threshold')
+        trades = int(np.sum(preds == 1))
+
+        sharpe = th_stats.get('sharpe', 0.0) if th_stats else 0.0
+        trade_ratio = trades / max(1, len(y_val))
+        trade_quality = min(trade_ratio / 0.25, 1.0)  # full credit if ~25%+ trading activity
+
+        # Stability score: robust ranking, penalize too-few trades and negative Sharpe
+        score = (
+            0.40 * aucpr
+            + 0.20 * auc
+            + 0.30 * np.tanh(max(sharpe, 0.0) / 3.0)
+            + 0.10 * trade_quality
+        )
+        if trades < Config.STABILITY_TUNING_MIN_TRADES:
+            score -= 0.15
+        if sharpe < 0:
+            score -= 0.10
+
+        if score > best_score:
+            best_score = score
+            best_params = params
+            best_meta = {
+                'auc': float(auc),
+                'aucpr': float(aucpr),
+                'sharpe': float(sharpe),
+                'trades': trades,
+                'threshold_buy': float(th_buy),
+                'threshold_sell': float(th_sell),
+                'score': float(score)
+            }
+
+    return best_params if best_params is not None else base_params.copy(), best_meta
+
 def create_volatility_weighted_classifier(base_model, volatility_weights=None):
     """
     Creates a wrapper that applies risk-adjustment during prediction.
@@ -943,6 +1347,9 @@ def train_and_evaluate_timeseries(df):
     all_val_proba = []
     all_val_indices = []
     future_predictions = []  # Store future predictions from each fold
+    prev_threshold_buy = Config.PROBABILITY_THRESHOLD_BUY
+    prev_threshold_sell = Config.PROBABILITY_THRESHOLD_SELL
+    tuned_params_cache = None
     
     for fold_idx, (train_idx, val_idx) in enumerate(cv_splits, start=1):
         # Get train and test indices
@@ -996,6 +1403,11 @@ def train_and_evaluate_timeseries(df):
         print(f"Train: {train_date_start} to {train_date_end} ({len(X_train_scaled)} samples)")
         print(f"Valid: {val_date_start} to {val_date_end} ({len(X_val_unscaled)} samples)")
         print(f"Class distribution in validation: {y_val.value_counts().to_dict()}")
+
+        # Validation forward returns for thresholding/tuning diagnostics
+        df_val = df.loc[X_val_unscaled.index].copy()
+        df_val['close_returns'] = df_val['close'].pct_change().shift(-1)
+        val_returns = np.where(np.isnan(df_val['close_returns'].values), 0, df_val['close_returns'].values)
         
         # === CLASS IMBALANCE HANDLING ===
         # Hybrid approach: AGGRESSIVE scale_pos_weight + ADASYN
@@ -1010,8 +1422,8 @@ def train_and_evaluate_timeseries(df):
             scale_pos_weight = base_weight * 1.5  # 1.5x amplification for extreme imbalance
         else:
             scale_pos_weight = 1.0
-        print(f"   ✅ Original class distribution: {class_counts.to_dict()}")
-        print(f"   ✅ Class weights computed: scale_pos_weight = {scale_pos_weight:.4f} (base={base_weight:.4f}, 1.5x amplified)")
+        # print(f"   ✅ Original class distribution: {class_counts.to_dict()}")
+        # print(f"   ✅ Class weights computed: scale_pos_weight = {scale_pos_weight:.4f} (base={base_weight:.4f}, 1.5x amplified)")
         
         # 2. Apply ADASYN to balance training data with error handling
         # ADASYN (Adaptive Synthetic Sampling): Generates more samples near decision boundary
@@ -1022,28 +1434,54 @@ def train_and_evaluate_timeseries(df):
         try:
             adasyn = ADASYN(random_state=42, n_neighbors=k_neighbors, sampling_strategy=0.95)
             X_train_smote, y_train_smote = adasyn.fit_resample(X_train_scaled, y_train)
-            print(f"   ✅ ADASYN applied: {len(X_train_scaled)} → {len(X_train_smote)} samples (n_neighbors={k_neighbors}, strategy=0.95)")
-            print(f"   ✅ Balanced class distribution: {pd.Series(y_train_smote).value_counts().to_dict()}")
+            # print(f"   ✅ ADASYN applied: {len(X_train_scaled)} → {len(X_train_smote)} samples (n_neighbors={k_neighbors}, strategy=0.95)")
+            # print(f"   ✅ Balanced class distribution: {pd.Series(y_train_smote).value_counts().to_dict()}")
         except (ValueError, RuntimeError) as e:
             # Fallback to SMOTE if ADASYN fails (needs more samples)
-            print(f"   ⚠️ ADASYN failed ({str(e)}). Trying SMOTE fallback...")
+            # print(f"   ⚠️ ADASYN failed ({str(e)}). Trying SMOTE fallback...")
             try:
                 smote = SMOTE(random_state=42, k_neighbors=k_neighbors, sampling_strategy=0.9)
                 X_train_smote, y_train_smote = smote.fit_resample(X_train_scaled, y_train)
-                print(f"   ✅ SMOTE applied (fallback): {len(X_train_scaled)} → {len(X_train_smote)} samples")
+                # print(f"   ✅ SMOTE applied (fallback): {len(X_train_scaled)} → {len(X_train_smote)} samples")
             except ValueError:
-                print(f"   ⚠️ SMOTE also failed. Using original training data.")
+                # print(f"   ⚠️ SMOTE also failed. Using original training data.")
                 X_train_smote, y_train_smote = X_train_scaled, y_train
-                print(f"   ℹ️ Training without synthetic balancing (scale_pos_weight={scale_pos_weight:.4f})")
+                # print(f"   ℹ️ Training without synthetic balancing (scale_pos_weight={scale_pos_weight:.4f})")
         
-        # === TRAIN MODEL WITH OPTIMIZED HYPERPARAMETERS ===
-        # Hyperparameters manually tuned for percentile labeling (50/50 balance, 1000 samples)
+        # === TRAIN MODEL WITH STABILITY-ORIENTED HYPERPARAMETERS ===
         xgb_params = Config.XGB_PARAMS.copy()
-        xgb_params['scale_pos_weight'] = scale_pos_weight  # Should be ~1.0 with balanced classes
+        xgb_params['scale_pos_weight'] = scale_pos_weight
+
+        should_tune = Config.ENABLE_STABILITY_TUNING and (
+            tuned_params_cache is None or not Config.TUNE_ON_FIRST_VALID_FOLD_ONLY
+        )
+
+        if should_tune:
+            # print(f"   🔧 Stability tuning XGBoost hyperparameters (fold {fold_idx})...")
+            tuned_params_cache, tuning_meta = tune_xgb_params_for_stability(
+                X_train_smote,
+                pd.Series(y_train_smote),
+                X_val_scaled,
+                y_val,
+                val_returns,
+                xgb_params,
+                scale_pos_weight
+            )
+            xgb_params = tuned_params_cache.copy()
+            # print(
+            #     f"   ✅ Tuning selected: depth={xgb_params['max_depth']}, "
+            #     f"lr={xgb_params['learning_rate']}, n_estimators={xgb_params['n_estimators']} "
+            #     f"| score={tuning_meta.get('score', 0):.3f}, aucpr={tuning_meta.get('aucpr', 0):.3f}, "
+            #     f"sharpe={tuning_meta.get('sharpe', 0):.2f}, trades={tuning_meta.get('trades', 0)}"
+            # )
+        elif tuned_params_cache is not None:
+            xgb_params = tuned_params_cache.copy()
+            xgb_params['scale_pos_weight'] = scale_pos_weight
         
         if fold_idx == 1:
-            print(f"   📊 Using optimized hyperparameters for percentile labeling:")
-            print(f"      max_depth={xgb_params['max_depth']}, lr={xgb_params['learning_rate']}, n_estimators={xgb_params['n_estimators']}")
+            pass
+            # print(f"   📊 Using optimized hyperparameters for percentile labeling:")
+            # print(f"      max_depth={xgb_params['max_depth']}, lr={xgb_params['learning_rate']}, n_estimators={xgb_params['n_estimators']}")
         
         # Train final XGBoost model
         model = xgb.XGBClassifier(**xgb_params)
@@ -1079,25 +1517,73 @@ def train_and_evaluate_timeseries(df):
         
         # Apply probability thresholding with intelligent position opening strategy
         threshold_buy = Config.PROBABILITY_THRESHOLD_BUY
+        threshold_sell = Config.PROBABILITY_THRESHOLD_SELL
         threshold_stats = None
+        
         if Config.ENABLE_THRESHOLD_GRIDSEARCH:
-            threshold_buy, threshold_stats = find_optimal_threshold(
-                y_val.values,
-                proba_preds_risk_adjusted,
-                metric=Config.THRESHOLD_OPTIM_METRIC,
-                min_recall=Config.THRESHOLD_MIN_RECALL,
-                min_precision=Config.THRESHOLD_MIN_PRECISION
+            if Config.OPTIMIZE_BY_SHARPE:
+                # NEW: Optimize by Sharpe Ratio (better for trading)
+                # print(f"   📊 Optimizing thresholds by SHARPE RATIO (trading-focused)...")
+                threshold_buy, threshold_sell, threshold_stats = find_optimal_threshold_sharpe(
+                    y_val.values,
+                    proba_preds_risk_adjusted,
+                    val_returns,  # Use calculated returns
+                    min_samples=10
+                )
+                if threshold_stats:
+                    pass
+                    # print(f"   ✅ Sharpe-optimized thresholds: BUY={threshold_buy:.3f}, SELL={threshold_sell:.3f}")
+                    # print(f"      → Sharpe: {threshold_stats['sharpe']:.2f}, Win Rate: {threshold_stats['win_rate']:.1%}")
+            else:
+                # Original F1 optimization
+                threshold_buy, threshold_stats = find_optimal_threshold(
+                    y_val.values,
+                    proba_preds_risk_adjusted,
+                    metric=Config.THRESHOLD_OPTIM_METRIC,
+                    min_recall=Config.THRESHOLD_MIN_RECALL,
+                    min_precision=Config.THRESHOLD_MIN_PRECISION
+                )
+        
+        # Apply adaptive thresholds based on market volatility
+        if Config.USE_ADAPTIVE_THRESHOLDS:
+            # Get volatility regime relative to TRAINING window (prevents self-centering bug)
+            train_volatility = X_train_unscaled['volatility_20'].values if 'volatility_20' in X_train_unscaled.columns else val_volatility
+            train_vol_mean = np.nanmean(train_volatility)
+            train_vol_std = np.nanstd(train_volatility) + 1e-8
+            avg_vol_zscore = ((val_volatility - train_vol_mean) / train_vol_std).mean()
+
+            adaptive_buy, adaptive_sell = get_adaptive_thresholds(
+                avg_vol_zscore, 
+                base_buy=threshold_buy, 
+                base_sell=threshold_sell
             )
+
+            # Smooth abrupt fold-to-fold jumps via EMA
+            threshold_buy, threshold_sell = smooth_thresholds(
+                adaptive_buy,
+                adaptive_sell,
+                prev_threshold_buy,
+                prev_threshold_sell,
+                alpha=Config.ADAPTIVE_THRESHOLD_SMOOTHING_ALPHA
+            )
+            # print(
+            #     f"   🎯 Adaptive thresholds smoothed (vol_zscore={avg_vol_zscore:.2f}): "
+            #     f"BUY={threshold_buy:.3f}, SELL={threshold_sell:.3f}"
+            # )
+
+            prev_threshold_buy, prev_threshold_sell = threshold_buy, threshold_sell
+        else:
+            avg_vol_zscore = 0.0
         
         # Apply intelligent position opening strategy
-        print(f"   📍 Position Opening: {Config.POSITION_OPENING_MODE.upper()} mode")
+        # print(f"   📍 Position Opening: {Config.POSITION_OPENING_MODE.upper()} mode")
         
         if Config.POSITION_OPENING_MODE == "hybrid":
             # Hybrid mode: threshold + percentile + technical validation
             preds_thresholded = apply_probability_threshold(
                 proba_preds_risk_adjusted,
                 threshold_buy,
-                Config.PROBABILITY_THRESHOLD_SELL,
+                threshold_sell,  # Use optimized/adaptive threshold
                 X_features=X_val_unscaled,  # Pass validation features for technical filters
                 percentile_threshold=Config.PERCENTILE_THRESHOLD,
                 mode='hybrid'
@@ -1107,23 +1593,49 @@ def train_and_evaluate_timeseries(df):
             preds_thresholded = apply_probability_threshold(
                 proba_preds_risk_adjusted,
                 threshold_buy,
-                Config.PROBABILITY_THRESHOLD_SELL,
+                threshold_sell,  # Use optimized/adaptive threshold
                 X_features=None,
                 percentile_threshold=Config.PERCENTILE_THRESHOLD,
                 mode=Config.POSITION_OPENING_MODE
             )
         
         # Log position statistics with trading details
+        preds_thresholded, gate_active, gate_reason = apply_regime_hard_gate(
+            preds_thresholded,
+            X_val_unscaled,
+            avg_vol_zscore
+        )
+        if gate_active:
+            print(f"   🛡️ Regime hard-gate active: {gate_reason}")
+
         n_positions = np.sum(preds_thresholded == 1)
         position_rate = 100 * n_positions / len(preds_thresholded)
         print(f"   ✅ Positions opened: {n_positions}/{len(preds_thresholded)} ({position_rate:.1f}%)")
+
+        # Dynamic position sizing (skip uncertain regimes/signals)
+        if Config.ENABLE_POSITION_SIZING:
+            position_sizes, size_stats = compute_position_sizes(
+                proba_preds_risk_adjusted,
+                threshold_buy,
+                volatility_zscore=avg_vol_zscore,
+                eligible_mask=(preds_thresholded == 1)
+            )
+            print(
+                f"   📏 Position sizing: sized={size_stats['n_sized']}/{size_stats['n_candidates']} "
+                f"| skipped uncertain={size_stats['n_skipped_uncertain']} "
+                f"| skipped low_conf={size_stats['n_skipped_low_conf']} "
+                f"| avg size={size_stats['avg_size']:.3f}"
+            )
+        else:
+            position_sizes = preds_thresholded.astype(float)
         
         # === BACKTEST SUMMARY (Historical Performance) ===
         df_val = df.loc[X_val_unscaled.index].copy() if X_val_unscaled is not None else df.tail(len(preds_thresholded)).copy()
         
-        # Winning trades from backtest
-        wins = (preds_thresholded == 1) & (y_val == 1)
-        losses = (preds_thresholded == 1) & (y_val == 0)
+        # Winning trades from backtest (only non-zero sized positions count)
+        active_positions = position_sizes > 0
+        wins = active_positions & (y_val == 1)
+        losses = active_positions & (y_val == 0)
         
         if wins.sum() > 0 or losses.sum() > 0:
             win_rate = wins.sum() / (wins.sum() + losses.sum()) if (wins.sum() + losses.sum()) > 0 else 0
@@ -1133,6 +1645,16 @@ def train_and_evaluate_timeseries(df):
             if losses.sum() > 0:
                 print(f"      Losing trades: {losses.sum()}")
             print(f"      Avoided losses: {((preds_thresholded == 0) & (y_val == 0)).sum()} (correctly predicted losers)")
+
+        diagnose_fold_market_conditions(
+            fold_idx,
+            X_train_unscaled,
+            X_val_unscaled,
+            y_val,
+            proba_preds_risk_adjusted,
+            preds_thresholded,
+            position_sizes
+        )
         
         # Calculate metrics (using risk-adjusted probabilities for consistency)
         auc = roc_auc_score(y_val, proba_preds_risk_adjusted)
@@ -1144,10 +1666,7 @@ def train_and_evaluate_timeseries(df):
         f1 = 2 * (precision * recall) / (precision + recall + 1e-6)
         
         # === STRATEGY RETURNS CALCULATION ===
-        # Compute returns directly from close prices to avoid NaN issues
-        df_val = df.loc[X_val_unscaled.index].copy()
-        df_val['close_returns'] = df_val['close'].pct_change().shift(-1)  # Future returns
-        val_returns = df_val['close_returns'].values
+        # (val_returns already calculated above for Sharpe optimization)
         
         # Filter out NaN returns (typically at the edges of the dataset)
         # Keep only valid indices where both predictions and returns exist
@@ -1166,11 +1685,12 @@ def train_and_evaluate_timeseries(df):
         
         # Only earn returns when position is opened (pred=1), otherwise earn 0 (cash)
         strategy_returns = val_returns_valid * preds_valid
-        strategy_returns_thresholded = val_returns_valid * preds_thresholded_valid
+        position_sizes_valid = position_sizes[valid_mask] if valid_mask.sum() > 0 else position_sizes
+        strategy_returns_thresholded = val_returns_valid * position_sizes_valid
         
         # === IMPROVED SHARPE/DRAWDOWN CALCULATION ===
         # Calculate for both raw and thresholded predictions
-        n_long_positions = np.sum(preds_thresholded_valid == 1)
+        n_long_positions = np.sum(position_sizes_valid > 0)
         n_long_positions_raw = np.sum(preds_valid == 1)
         valid_days_count = len(preds_thresholded_valid)
         
@@ -1220,7 +1740,9 @@ def train_and_evaluate_timeseries(df):
             'recall': recall,
             'f1': f1,
             'threshold_buy': float(threshold_buy),
-            'threshold_metric': Config.THRESHOLD_OPTIM_METRIC if Config.ENABLE_THRESHOLD_GRIDSEARCH else 'static'
+            'threshold_sell': float(threshold_sell),
+            'threshold_metric': 'sharpe' if Config.OPTIMIZE_BY_SHARPE else Config.THRESHOLD_OPTIM_METRIC if Config.ENABLE_THRESHOLD_GRIDSEARCH else 'static',
+            'adaptive_thresholds': Config.USE_ADAPTIVE_THRESHOLDS
         })
         
         # Store predictions for visualization
@@ -1229,7 +1751,10 @@ def train_and_evaluate_timeseries(df):
         all_val_indices.append(val_idx)
         
         if threshold_stats:
-            print(f"  → Threshold tuned ({Config.THRESHOLD_OPTIM_METRIC}): {threshold_buy:.4f} | PR: {threshold_stats['precision']:.3f}/{threshold_stats['recall']:.3f} | F1: {threshold_stats['f1']:.3f}")
+            if Config.OPTIMIZE_BY_SHARPE:
+                print(f"  → Thresholds (sharpe): BUY={threshold_buy:.4f}, SELL={threshold_sell:.4f} | Sharpe: {threshold_stats['sharpe']:.2f} | WinRate: {threshold_stats['win_rate']:.1%}")
+            else:
+                print(f"  → Threshold tuned ({Config.THRESHOLD_OPTIM_METRIC}): {threshold_buy:.4f} | PR: {threshold_stats['precision']:.3f}/{threshold_stats['recall']:.3f} | F1: {threshold_stats['f1']:.3f}")
         print(f"  → AUC: {auc:.4f} | AUCPR: {aucpr:.4f} | Accuracy: {accuracy:.4f} ({accuracy_thresholded:.4f} w/ threshold)")
         print(f"  → Sharpe: {sharpe:.4f} ({sharpe_thresholded:.4f} w/ threshold) | Max DD: {max_dd:.4f}")
         
@@ -1274,13 +1799,26 @@ def train_and_evaluate_timeseries(df):
                     print(f"   " + "="*60)
                     last_price = df['close'].iloc[-1]
                     last_date = df.index[-1]
-                    profit_target = last_price * 1.015
-                    stop_loss = last_price * 0.985
+                    if Config.DYNAMIC_RISK_VOL_METRIC == 'atr_14d' and 'atr' in df.columns:
+                        latest_volatility = float(pd.to_numeric(df['atr'], errors='coerce').ffill().iloc[-1])
+                        vol_metric_used = 'atr_14d'
+                    elif 'volatility_20' in df.columns:
+                        latest_volatility = float(pd.to_numeric(df['volatility_20'], errors='coerce').ffill().iloc[-1])
+                        vol_metric_used = 'rolling_std_20d'
+                    else:
+                        latest_volatility = float(pd.to_numeric(df['close'], errors='coerce').rolling(window=20).std().ffill().iloc[-1])
+                        vol_metric_used = 'rolling_std_20d'
+
+                    profit_target = last_price + (latest_volatility * Config.DYNAMIC_RISK_K_TP)
+                    stop_loss = last_price - (latest_volatility * Config.DYNAMIC_RISK_K_SL)
+                    tp_pct = ((profit_target - last_price) / last_price) * 100
+                    sl_pct = ((stop_loss - last_price) / last_price) * 100
                     
                     print(f"   📅 Valid from: {last_date.strftime('%Y-%m-%d')}")
                     print(f"   💰 Entry Price: ${last_price:.2f}")
-                    print(f"   🎯 Profit Target: ${profit_target:.2f} (+1.50%)")
-                    print(f"   🛑 Stop Loss: ${stop_loss:.2f} (-1.50%)")
+                    print(f"   🎚️ Dynamic Risk: {Config.DYNAMIC_RISK_TYPE} | metric={vol_metric_used} | k_tp={Config.DYNAMIC_RISK_K_TP} | k_sl={Config.DYNAMIC_RISK_K_SL}")
+                    print(f"   🎯 Profit Target: ${profit_target:.2f} ({tp_pct:+.2f}%)")
+                    print(f"   🛑 Stop Loss: ${stop_loss:.2f} ({sl_pct:+.2f}%)")
                     print(f"   📊 Win Probability: {future_prob*100:.1f}%")
                     
                     if future_prob > 0.65:
@@ -1446,8 +1984,29 @@ if __name__ == "__main__":
                 # Get latest price and targets
                 last_price = main_df['close'].iloc[-1]
                 last_date = main_df.index[-1]
-                profit_target = last_price * 1.015
-                stop_loss = last_price * 0.985
+                if Config.DYNAMIC_RISK_VOL_METRIC == 'atr_14d' and 'atr' in main_df.columns:
+                    latest_volatility = float(pd.to_numeric(main_df['atr'], errors='coerce').ffill().iloc[-1])
+                    vol_metric_used = 'atr_14d'
+                elif 'volatility_20' in main_df.columns:
+                    latest_volatility = float(pd.to_numeric(main_df['volatility_20'], errors='coerce').ffill().iloc[-1])
+                    vol_metric_used = 'rolling_std_20d'
+                else:
+                    latest_volatility = float(pd.to_numeric(main_df['close'], errors='coerce').rolling(window=20).std().ffill().iloc[-1])
+                    vol_metric_used = 'rolling_std_20d'
+
+                profit_target = last_price + (latest_volatility * Config.DYNAMIC_RISK_K_TP)
+                stop_loss = last_price - (latest_volatility * Config.DYNAMIC_RISK_K_SL)
+
+                dynamic_risk_config = {
+                    "dynamic_risk": {
+                        "type": Config.DYNAMIC_RISK_TYPE,
+                        "params": {
+                            "k_tp": Config.DYNAMIC_RISK_K_TP,
+                            "k_sl": Config.DYNAMIC_RISK_K_SL,
+                            "vol_metric": vol_metric_used
+                        }
+                    }
+                }
                 
                 # Ensemble: Average probability from all folds
                 avg_prob = np.mean([p['probability'] for p in future_preds])
@@ -1457,8 +2016,12 @@ if __name__ == "__main__":
                 # Display with Rich UI
                 ui.show_final_summary(selected_ticker, future_preds)
                 recommendation = ui.show_recommendation(
-                    avg_prob, last_price, profit_target, stop_loss,
-                    last_date.strftime('%Y-%m-%d')
+                    avg_prob,
+                    last_price,
+                    profit_target,
+                    stop_loss,
+                    last_date.strftime('%Y-%m-%d'),
+                    dynamic_risk_config=dynamic_risk_config
                 )
                 
                 ui.show_success("Pipeline execution completed successfully!")

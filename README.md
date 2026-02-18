@@ -1,64 +1,81 @@
-# ForecastTRADE: Hybrid Financial Forecasting Model
+# 📈 ForecastTRADE v2.0
 
-Este proyecto implementa un modelo de pronóstico financiero híbrido que combina un modelo de Deep Learning (LSTM) con un modelo de Gradient Boosting (XGBoost) para predecir la dirección del precio de las acciones (en este caso, AAPL).
+**Hybrid LSTM-XGBoost Stock Prediction System with Volatility-Adaptive Risk Management**
 
-La arquitectura sigue una filosofía de "equipo de especialistas":
-- **LSTM (Analista de Patrones):** Actúa como un experto en análisis técnico visual, procesando secuencias de precios (OHLCV) para detectar inercias y patrones de tendencia.
-- **XGBoost (Director de Decisiones):** Recibe la predicción de tendencia de la LSTM como un "indicador experto" y la cruza con otros datos (indicadores técnicos, sentimiento del mercado y volatilidad) para tomar una decisión final sobre si el retorno del día siguiente será positivo.
+ForecastTRADE es un sistema de trading algorítmico avanzado que combina el poder del Deep Learning (LSTM) para la extracción de características con la precisión de los árboles de decisión (XGBoost) para la ejecución táctica. Está diseñado para operar con estabilidad y robustez en múltiples regímenes de mercado.
 
-## Requisitos
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
+![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange)
+![XGBoost](https://img.shields.io/badge/XGBoost-Latest-green)
 
-- Python 3.8+
-- `venv` para la gestión de entornos virtuales
+---
 
-## Cómo Empezar
+## 🚀 Características Clave (v2.0)
 
-Siga estos pasos para configurar y ejecutar el proyecto.
+-   **🧠 Arquitectura Híbrida:** 
+    -   **LSTM (Dual-Task):** Aprende la "física" del mercado resolviendo regresión (precio) y clasificación (dirección) simultáneamente.
+    -   **XGBoost (Ensemble):** Toma decisiones finales basadas en el estado latente de la LSTM y señales técnicas.
+-   **🛡️ Triple Barrier Method:** Etiquetado inteligente de datos basado en volatilidad local (TP=2.5σ, SL=1.25σ) para evitar ruido.
+-   **📅 Sliding Window Validation:** Estrategia de validación cruzada (12 folds) con embargo period (20d) para eliminar *data leakage*.
+-   **⚖️ Gestión de Riesgo Dinámica:** Sugiere volumen de posición y niveles de Stop-Loss adaptados a la volatilidad del mercado.
+-   **✨ Rich UI:** Interfaz de terminal profesional con barras de progreso, tablas y gráficos ASCII.
 
-### 1. Clonar el Repositorio
+---
 
-Si ha descargado los archivos manualmente, puede omitir este paso.
+## 🛠️ Instalación
+
+1.  **Clonar el repositorio:**
+    ```bash
+    git clone <URL_DEL_REPOSITORIO>
+    cd ForecastTRADE
+    ```
+
+2.  **Crear entorno virtual:**
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    ```
+
+3.  **Instalar dependencias:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+---
+
+## 💻 Uso
+
+El punto de entrada principal es `run.py`, que gestiona todo el ciclo de vida de la predicción.
+
 ```bash
-git clone <URL_DEL_REPOSITORIO>
-cd ForecastTRADE
+# Asegúrate de tener el entorno activado
+source .venv/bin/activate
+
+# Ejecutar el sistema
+python run.py
 ```
 
-### 2. Crear y Activar el Entorno Virtual
+### Flujo de Ejecución:
+1.  **Selección de Activo:** Elija un ticker (ej. MSFT, NVDA, AAPL) desde el menú interactivo.
+2.  **Data Fetching:** Se descargan datos históricos de Yahoo Finance.
+3.  **LSTM Training:** Se entrena la red neuronal para extraer "Latent Features" (representaciones comprimidas del mercado).
+4.  **Feature Engineering:** Se calculan indicadores técnicos avanzados y se filtran por importancia.
+5.  **Backtesting (12 Folds):** Se ejecuta la validación cruzada deslizante para verificar la estabilidad.
+6.  **Final Recommendation:** Se genera una señal de trading (BUY/SELL/HOLD) con niveles de precio específicos.
 
-Es una buena práctica aislar las dependencias del proyecto.
+---
 
-```bash
-# Crear el entorno virtual
-python3 -m venv venv
+## 📊 Interpretación de Resultados
 
-# Activar el entorno (en Linux/macOS)
-source venv/bin/activate
-```
-*Nota: En Windows, la activación se hace con `.\venv\Scripts\activate`.*
+Al finalizar, el sistema generará:
+-   **Gráficos en `out/`:** Visualizaciones de las predicciones vs realidad para cada fold.
+-   **Resumen de Consola:**
+    -   **Win Probability:** Probabilidad estimada de éxito.
+    -   **Recommendation:** Acción sugerida (requiere >65% para BUY).
+    -   **Dynamic Risk:** Niveles de Profit Target y Stop Loss calculados dinámicamente.
 
-### 3. Instalar las Dependencias
+---
 
-Instale todas las librerías necesarias con el siguiente comando:
-```bash
-pip install -r requirements.txt
-```
+## 🏗️ Arquitectura
 
-### 4. Ejecutar el Pipeline
-
-Para iniciar el proceso de entrenamiento y evaluación, simplemente ejecute el script principal:
-```bash
-python main.py
-```
-
-## ¿Qué esperar de la ejecución?
-
-El script realizará las siguientes acciones:
-1.  **Descargará** los datos históricos de precios para AAPL y el índice VIX.
-2.  **Entrenará el modelo LSTM** para aprender los patrones de secuencia de precios. Verá el resumen de la arquitectura de la red en la consola.
-3.  **Generará un gráfico** `lstm_prediction_vs_real_AAPL.png` que muestra qué tan bien la LSTM predijo los precios en el conjunto de prueba.
-4.  **Integrará** la predicción de la LSTM como una nueva característica.
-5.  **Entrenará y evaluará el modelo XGBoost** final utilizando validación cruzada de series temporales.
-6.  **Imprimirá en la consola** un resumen del rendimiento del modelo (AUC y Accuracy) para cada fold de la validación.
-7.  **Mostrará un ranking** de las 10 características más importantes para el modelo XGBoost, permitiéndole ver qué información valora más el "Director de Decisiones".
-
-Al finalizar, habrá ejecutado un pipeline completo de finanzas cuantitativas, desde la ingeniería de características hasta la evaluación de un modelo híbrido complejo.
+Para detalles técnicos profundos sobre cómo funciona el Dual-Task LSTM, el Triple Barrier Method y la ingeniería de características, consulte [MODEL_ARCHITECTURE.md](MODEL_ARCHITECTURE.md).

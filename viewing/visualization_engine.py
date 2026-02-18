@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.gridspec import GridSpec
 from datetime import datetime
+import json
 import os
 
 class VisualizationEngine:
@@ -36,6 +37,19 @@ class VisualizationEngine:
             'forecast': '#d62728',
             'confidence_hi': '#ff9999',
             'confidence_lo': '#99ccff'
+        }
+
+    @staticmethod
+    def _get_dynamic_risk_config(vol_metric='rolling_std_20d', k_tp=2.5, k_sl=1.25):
+        return {
+            "dynamic_risk": {
+                "type": "Volatility_Adjusted",
+                "params": {
+                    "k_tp": k_tp,
+                    "k_sl": k_sl,
+                    "vol_metric": vol_metric
+                }
+            }
         }
     
     def plot_lstm_xgboost_hybrid(self, df, train_data, test_data,
@@ -242,9 +256,24 @@ class VisualizationEngine:
             avg_return = 0.001
             volatility = 0.01
         
-        # Calculate targets: SYMMETRIC +1.50%, -1.50% for balanced class distribution
-        profit_target = last_price * 1.015
-        stop_loss = last_price * 0.985
+        # Dynamic volatility-adjusted targets (asset-agnostic)
+        if 'volatility_20' in df.columns and pd.notna(df['volatility_20'].iloc[-1]):
+            volatility_price = float(df['volatility_20'].iloc[-1])
+            vol_metric = 'rolling_std_20d'
+        elif 'atr' in df.columns and pd.notna(df['atr'].iloc[-1]):
+            volatility_price = float(df['atr'].iloc[-1])
+            vol_metric = 'atr_14d'
+        else:
+            volatility_price = float(df['close'].rolling(window=20).std().ffill().iloc[-1])
+            vol_metric = 'rolling_std_20d'
+
+        k_tp = 2.5
+        k_sl = 1.25
+        profit_target = last_price + (volatility_price * k_tp)
+        stop_loss = last_price - (volatility_price * k_sl)
+        tp_pct = ((profit_target - last_price) / last_price) * 100
+        sl_pct = ((stop_loss - last_price) / last_price) * 100
+        dynamic_risk_config = self._get_dynamic_risk_config(vol_metric=vol_metric, k_tp=k_tp, k_sl=k_sl)
         
         # Generate forecast with directional bias from model prediction
         forecast_prices = []
@@ -306,9 +335,9 @@ class VisualizationEngine:
         
         # Trading targets
         ax1.axhline(profit_target, color='green', linestyle='--', linewidth=2.5, 
-                   alpha=0.8, label=f'Profit Target: +1.50% (${profit_target:.2f})', zorder=2)
+                   alpha=0.8, label=f'Profit Target: {tp_pct:+.2f}% (${profit_target:.2f})', zorder=2)
         ax1.axhline(stop_loss, color='red', linestyle='--', linewidth=2.5, 
-                   alpha=0.8, label=f'Stop Loss: -1.50% (${stop_loss:.2f})', zorder=2)
+                   alpha=0.8, label=f'Stop Loss: {sl_pct:+.2f}% (${stop_loss:.2f})', zorder=2)
         ax1.axhline(last_price, color='blue', linestyle=':', linewidth=1.5, 
                    alpha=0.6, label=f'Entry Price: ${last_price:.2f}', zorder=1)
         
@@ -379,12 +408,12 @@ class VisualizationEngine:
             action = "BUY"
             action_symbol = "^"  # Up arrow
             action_color = 'darkgreen'
-            reason = f"High win probability ({latest_prob*100:.1f}%)\nTarget: ${profit_target:.2f} (+1.50%)"
+            reason = f"High win probability ({latest_prob*100:.1f}%)\nTarget: ${profit_target:.2f} ({tp_pct:+.2f}%)"
         elif latest_prob < 0.35:
             action = "SELL/AVOID"
             action_symbol = "v"  # Down arrow
             action_color = 'darkred'
-            reason = f"High loss risk ({(1-latest_prob)*100:.1f}%)\nRisk: ${stop_loss:.2f} (-1.50%)"
+            reason = f"High loss risk ({(1-latest_prob)*100:.1f}%)\nRisk: ${stop_loss:.2f} ({sl_pct:+.2f}%)"
         else:
             action = "HOLD/WAIT"
             action_symbol = "-"  # Dash
@@ -403,6 +432,8 @@ class VisualizationEngine:
         ax3.text(0.5, 0.15, f'Valid from: {last_date.strftime("%Y-%m-%d")}\nNext {forecast_horizon} days',
                 fontsize=9, ha='center', va='center', color='gray',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgray', alpha=0.3))
+
+        print(f"   ⚙️ Dynamic risk config: {json.dumps(dynamic_risk_config)}")
         
         # Save main forecast
         filename = f'out/future_forecast_run_{run_number}_{run_date}.png'
@@ -425,9 +456,9 @@ class VisualizationEngine:
         
         # Targets
         ax_zoom.axhline(profit_target, color='green', linestyle='--', linewidth=2, 
-                       alpha=0.8, label=f'Target: ${profit_target:.2f} (+1.50%)')
+                       alpha=0.8, label=f'Target: ${profit_target:.2f} ({tp_pct:+.2f}%)')
         ax_zoom.axhline(stop_loss, color='red', linestyle='--', linewidth=2, 
-                       alpha=0.8, label=f'Stop: ${stop_loss:.2f} (-1.50%)')
+                       alpha=0.8, label=f'Stop: ${stop_loss:.2f} ({sl_pct:+.2f}%)')
         
         # Confidence
         ax_zoom.fill_between(forecast_dates, lower_conf, upper_conf,
