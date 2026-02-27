@@ -80,6 +80,7 @@ class AccumulativeRunLogger:
                 'technical_features': sum(1 for f in run_config.get('features_used', []) 
                                          if 'lstm' not in f)
             },
+            'features_contract': run_config.get('features_contract', {}),
             
             # Dataset Info
             'dataset': {
@@ -87,6 +88,7 @@ class AccumulativeRunLogger:
                 'test_size': run_config.get('test_size', 0),
                 'total_samples': run_config.get('train_size', 0) + run_config.get('test_size', 0)
             },
+            'cv': run_config.get('cv', {}),
             
             # Classification Metrics
             'metrics': {
@@ -158,14 +160,16 @@ class AccumulativeRunLogger:
         all_aucs = [r['metrics']['auc_roc'] for r in self.runs['runs']]
         all_accuracy = [r['metrics']['accuracy'] for r in self.runs['runs']]
         all_sharpe = [r['financial_metrics']['sharpe_ratio'] for r in self.runs['runs']]
+        finite_sharpe = [s for s in all_sharpe if np.isfinite(s)]
         
         self.runs['metadata']['average_auc'] = float(np.mean(all_aucs)) if all_aucs else 0.0
         self.runs['metadata']['average_accuracy'] = float(np.mean(all_accuracy)) if all_accuracy else 0.0
-        self.runs['metadata']['average_sharpe'] = float(np.mean(all_sharpe)) if all_sharpe else 0.0
+        self.runs['metadata']['average_sharpe'] = float(np.nanmean(finite_sharpe)) if finite_sharpe else 0.0
         
         # Variance (stability metric)
         self.runs['metadata']['auc_variance'] = float(np.var(all_aucs)) if all_aucs else 0.0
         self.runs['metadata']['accuracy_variance'] = float(np.var(all_accuracy)) if all_accuracy else 0.0
+        self.runs['metadata']['last_updated'] = datetime.now().isoformat()
     
     def save(self):
         """Save log to JSON file."""
@@ -222,6 +226,9 @@ class AccumulativeRunLogger:
                 'timestamp': run['timestamp'],
                 'ticker': run['ticker'],
                 'fold': run['fold'],
+                'cv_folds_configured': run.get('cv', {}).get('n_folds_configured'),
+                'cv_folds_valid': run.get('cv', {}).get('n_folds_valid'),
+                'cv_folds_skipped': run.get('cv', {}).get('n_folds_skipped'),
                 'features_count': run['features']['count'],
                 'lstm_dims': run['features']['lstm_latent_dims'],
                 'train_size': run['dataset']['train_size'],

@@ -28,10 +28,16 @@ from sklearn.preprocessing import RobustScaler
 from imblearn.over_sampling import SMOTE, ADASYN
 import warnings
 from datetime import datetime, timedelta
-from lstm_predictor import generate_lstm_regime_features
-from run_logger import AccumulativeRunLogger
+from typing import Any, Dict, List, Literal, Optional
+try:
+    from .lstm_predictor import generate_lstm_regime_features
+    from .run_logger import AccumulativeRunLogger
+    from .rich_ui import RichUI
+except ImportError:
+    from lstm_predictor import generate_lstm_regime_features
+    from run_logger import AccumulativeRunLogger
+    from rich_ui import RichUI
 # from triple_barrier_labeler import TripleBarrierLabeler  # DEPRECATED: now using percentile-based labeling
-from rich_ui import RichUI
 
 # VisualizationEngine will be imported dynamically when needed
 VisualizationEngine = None
@@ -98,10 +104,12 @@ class Config:
     USE_SLIDING_WINDOW = True  # Enable adaptive sliding window strategy
     SLIDING_WINDOW_SIZE = 400  # 400 days window (~1.5 years)
     VALIDATION_WINDOW_SIZE = 120  # Increased to 120 days (~6 months) for statistically significant validation
+    MIN_VALIDATION_SIZE = 60  # Minimum validation samples to keep a fold
     # Benefit: Model returns are more realistic and less prone to "lucky" small sample sizes
     # Note: Requires more data but yields robust metrics
     
     # Probability Threshold Parameters
+    TRADING_MODE: Literal["long_only", "long_short"] = "long_only"
     PROBABILITY_THRESHOLD_BUY = 0.65  # Only buy if prob > 65% (baseline)
     PROBABILITY_THRESHOLD_SELL = 0.35  # Only sell if prob < 35% (baseline)
     ENABLE_THRESHOLD_GRIDSEARCH = True  # Tune buy threshold from PR curve
@@ -143,7 +151,7 @@ class Config:
     # Bottleneck compression removes noise while retaining essential information
     # Market regime features provide contextual awareness (volatility, trend strength, bull/bear position)
     # These are then combined with the best technical features for XGBoost
-    FEATURES_TO_SCALE = [
+    FEATURES_TO_SCALE = [  # Seed list; final features are resolved dynamically
         # LSTM Compressed Latent Features (10-dimensional, linear activation)
         # These capture temporal context and regime information (noise-filtered)
         'lstm_latent_0', 'lstm_latent_1', 'lstm_latent_2', 'lstm_latent_3', 'lstm_latent_4',
@@ -165,6 +173,7 @@ class Config:
         # Market
         'close_vix_ratio', 'vix_change',
     ]
+    MIN_FEATURES = 15  # Minimum features required after contract resolution
 
 
 # --- 2. DATA FETCHING ---
@@ -546,6 +555,44 @@ def filter_low_importance_features(df, known_low_importance=None):
     
     return df, features_to_drop
 
+
+def resolve_feature_contract(
+    df: pd.DataFrame,
+    seed_features: List[str],
+    removed_by_corr: Optional[List[str]] = None,
+    removed_by_importance: Optional[List[str]] = None,
+    min_features: int = 15,
+) -> Dict[str, Any]:
+    """
+    Resolve the final feature contract after all engineering/filtering steps.
+
+    Returns a dictionary with requested/available/final feature lists and
+    dropped-feature diagnostics.
+    """
+    removed_by_corr = removed_by_corr or []
+    removed_by_importance = removed_by_importance or []
+
+    requested = list(seed_features)
+    available = [f for f in requested if f in df.columns]
+    intentional_drops = set(removed_by_corr) | set(removed_by_importance)
+    missing_unexpected = [f for f in requested if f not in df.columns and f not in intentional_drops]
+
+    final_features = [f for f in available if pd.api.types.is_numeric_dtype(df[f])]
+    if len(final_features) < min_features:
+        raise ValueError(
+            f"Feature contract too small: {len(final_features)} < {min_features}. "
+            "Review feature engineering and filtering thresholds."
+        )
+
+    return {
+        'requested': requested,
+        'available': available,
+        'removed_by_corr': sorted(set(removed_by_corr)),
+        'removed_by_importance': sorted(set(removed_by_importance)),
+        'missing_unexpected': missing_unexpected,
+        'final': final_features,
+    }
+
 # --- 4. TARGET DEFINITION ---
 def define_target(df):
     """
@@ -667,20 +714,13 @@ def define_target(df):
     return df
 
 # --- 5. PREPROCESSING (WITH FOLD-SPECIFIC SCALING) ---
-def get_feature_columns(df):
-    """
-    Get list of feature columns available in the dataframe.
-    
-    Returns:
-        list: Feature column names
-    """
-    feature_cols = [c for c in Config.FEATURES_TO_SCALE if c in df.columns]
-    if len(feature_cols) < len(Config.FEATURES_TO_SCALE):
-        missing = [c for c in Config.FEATURES_TO_SCALE if c not in df.columns]
-        print(f"⚠️ Missing features: {missing}")
-    return feature_cols
+def get_feature_columns(df, feature_contract: Optional[Dict[str, Any]] = None):
+    """Get the effective feature columns from the resolved contract."""
+    if feature_contract is not None:
+        return [c for c in feature_contract.get('final', []) if c in df.columns]
+    return [c for c in Config.FEATURES_TO_SCALE if c in df.columns]
 
-def preprocess_data_raw(df):
+def preprocess_data_raw(df, feature_contract: Optional[Dict[str, Any]] = None):
     """
     Basic preprocessing: handle NaNs and ensure numeric types.
     NO SCALING (scaling must be done per-fold to prevent leakage).
@@ -697,7 +737,7 @@ def preprocess_data_raw(df):
     initial_shape = df.shape[0]
     
     # Get feature columns
-    feature_cols = get_feature_columns(df)
+    feature_cols = get_feature_columns(df, feature_contract=feature_contract)
     
     # Ensure all feature columns are numeric (coerce errors to NaN)
     for col in feature_cols:
@@ -767,8 +807,15 @@ def calculate_max_drawdown(returns):
     drawdown = (cumulative - running_max) / running_max
     return drawdown.min()
 
-def apply_probability_threshold(proba_preds, threshold_buy=0.65, threshold_sell=0.35, 
-                              X_features=None, percentile_threshold=None, mode='threshold'):
+def apply_probability_threshold(
+    proba_preds,
+    threshold_buy=0.65,
+    threshold_sell=0.35,
+    X_features=None,
+    percentile_threshold=None,
+    mode='threshold',
+    trading_mode: Literal["long_only", "long_short"] = "long_only",
+):
     """
     Intelligent position opening with multiple filtering strategies.
     
@@ -841,6 +888,8 @@ def apply_probability_threshold(proba_preds, threshold_buy=0.65, threshold_sell=
             # No technical features, just use top trades
             filtered[top_trades] = 1
     
+    if trading_mode == "long_short":
+        filtered[proba_preds <= threshold_sell] = -1
     return filtered
 
 def find_optimal_threshold(y_true, proba_preds, metric="f1", min_recall=0.25, min_precision=0.25):
@@ -883,7 +932,7 @@ def find_optimal_threshold(y_true, proba_preds, metric="f1", min_recall=0.25, mi
     }
 
 
-def find_optimal_threshold_sharpe(y_true, proba_preds, returns, min_samples=10):
+def find_optimal_buy_threshold_sharpe(y_true, proba_preds, returns, min_samples=10):
     """
     Find optimal probability threshold that MAXIMIZES SHARPE RATIO.
     
@@ -897,61 +946,49 @@ def find_optimal_threshold_sharpe(y_true, proba_preds, returns, min_samples=10):
         min_samples (int): Minimum trades required to calculate Sharpe
     
     Returns:
-        tuple: (threshold_buy, threshold_sell, stats dict)
+        tuple: (threshold_buy, stats dict)
     """
     # Grid search over threshold space
     threshold_buy_range = np.arange(0.45, 0.80, 0.05)  # More granular: 45% to 75%
-    threshold_sell_range = np.arange(0.25, 0.50, 0.05)  # 25% to 45%
     
     best_sharpe = -np.inf
     best_threshold_buy = 0.65
-    best_threshold_sell = 0.35
     best_stats = {}
     
     for th_buy in threshold_buy_range:
-        for th_sell in threshold_sell_range:
-            # Only process if buy > sell
-            if th_buy <= th_sell:
-                continue
-            
-            # Create binary predictions
-            preds = np.zeros(len(proba_preds))
-            preds[proba_preds >= th_buy] = 1
-            preds[proba_preds <= th_sell] = -1  # Sell signal
-            
-            # Calculate returns for trades taken
-            trade_mask = preds != 0
-            if trade_mask.sum() < min_samples:
-                continue
-            
-            trade_returns = returns[trade_mask]
-            
-            # Calculate Sharpe Ratio
-            if len(trade_returns) > 0 and trade_returns.std() > 0:
-                sharpe = trade_returns.mean() / trade_returns.std() * np.sqrt(252)
-            else:
-                sharpe = 0
-            
-            # Track best
-            if sharpe > best_sharpe:
-                best_sharpe = sharpe
-                best_threshold_buy = th_buy
-                best_threshold_sell = th_sell
-                
-                # Calculate additional stats
-                win_rate = (trade_returns > 0).sum() / len(trade_returns) if len(trade_returns) > 0 else 0
-                avg_return = trade_returns.mean() if len(trade_returns) > 0 else 0
-                
-                best_stats = {
-                    'sharpe': float(sharpe),
-                    'n_trades': int(trade_mask.sum()),
-                    'win_rate': float(win_rate),
-                    'avg_return': float(avg_return),
-                    'threshold_buy': float(th_buy),
-                    'threshold_sell': float(th_sell)
-                }
-    
-    return best_threshold_buy, best_threshold_sell, best_stats
+        preds = np.zeros(len(proba_preds))
+        preds[proba_preds >= th_buy] = 1
+        trade_mask = preds == 1
+        if trade_mask.sum() < min_samples:
+            continue
+
+        trade_returns = returns[trade_mask]
+        if len(trade_returns) > 0 and trade_returns.std() > 0:
+            sharpe = trade_returns.mean() / trade_returns.std() * np.sqrt(252)
+        else:
+            sharpe = 0
+
+        if sharpe > best_sharpe:
+            best_sharpe = sharpe
+            best_threshold_buy = th_buy
+
+            win_rate = (trade_returns > 0).sum() / len(trade_returns) if len(trade_returns) > 0 else 0
+            avg_return = trade_returns.mean() if len(trade_returns) > 0 else 0
+
+            best_stats = {
+                'sharpe': float(sharpe),
+                'n_trades': int(trade_mask.sum()),
+                'win_rate': float(win_rate),
+                'avg_return': float(avg_return),
+                'threshold_buy': float(th_buy),
+            }
+
+    return best_threshold_buy, best_stats
+
+
+def find_optimal_thresholds_long_short(y_true, proba_preds, returns, min_samples=10):
+    """Reserved placeholder for future long/short mode."""
+    return 0.65, 0.35, {}
 
 
 def get_adaptive_thresholds(volatility_zscore, base_buy=0.65, base_sell=0.35):
@@ -1169,13 +1206,33 @@ def tune_xgb_params_for_stability(
         auc = roc_auc_score(y_val, proba)
         aucpr = average_precision_score(y_val, proba)
 
-        th_buy, th_sell, th_stats = find_optimal_threshold_sharpe(
-            y_val.values,
-            proba,
-            val_returns,
-            min_samples=Config.STABILITY_TUNING_MIN_TRADES
-        )
-        preds = apply_probability_threshold(proba, th_buy, th_sell, mode='threshold')
+        if Config.TRADING_MODE == "long_only":
+            th_buy, th_stats = find_optimal_buy_threshold_sharpe(
+                y_val.values,
+                proba,
+                val_returns,
+                min_samples=Config.STABILITY_TUNING_MIN_TRADES
+            )
+            preds = apply_probability_threshold(
+                proba,
+                th_buy,
+                mode='threshold',
+                trading_mode=Config.TRADING_MODE
+            )
+        else:
+            th_buy, th_sell, th_stats = find_optimal_thresholds_long_short(
+                y_val.values,
+                proba,
+                val_returns,
+                min_samples=Config.STABILITY_TUNING_MIN_TRADES
+            )
+            preds = apply_probability_threshold(
+                proba,
+                th_buy,
+                th_sell,
+                mode='threshold',
+                trading_mode=Config.TRADING_MODE
+            )
         trades = int(np.sum(preds == 1))
 
         sharpe = th_stats.get('sharpe', 0.0) if th_stats else 0.0
@@ -1203,7 +1260,7 @@ def tune_xgb_params_for_stability(
                 'sharpe': float(sharpe),
                 'trades': trades,
                 'threshold_buy': float(th_buy),
-                'threshold_sell': float(th_sell),
+                'threshold_sell': float(th_sell) if Config.TRADING_MODE == "long_short" else None,
                 'score': float(score)
             }
 
@@ -1284,7 +1341,31 @@ def sliding_window_splits(n_samples, train_size, test_size, n_splits=8):
             if len(train_indices) >= train_size // 2 and len(test_indices) > 0:
                 yield train_indices, test_indices
 
-def train_and_evaluate_timeseries(df):
+def summarize_cv_results(fold_results, skipped_folds):
+    """Summarize CV outcomes with explicit valid/skipped fold accounting."""
+    if not fold_results:
+        return {
+            'configured_folds': 0,
+            'n_folds_total': len(skipped_folds),
+            'n_folds_valid': 0,
+            'n_folds_skipped': len(skipped_folds),
+            'skip_reasons': [f.get('reason', 'unknown') for f in skipped_folds],
+            'results_df': pd.DataFrame(),
+        }
+
+    results_df = pd.DataFrame(fold_results)
+    n_total = len(fold_results) + len(skipped_folds)
+    return {
+        'configured_folds': n_total,
+        'n_folds_total': n_total,
+        'n_folds_valid': len(fold_results),
+        'n_folds_skipped': len(skipped_folds),
+        'skip_reasons': [f.get('reason', 'unknown') for f in skipped_folds],
+        'results_df': results_df,
+    }
+
+
+def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]] = None):
     """
     Trains and evaluates the XGBoost model using TimeSeriesSplit
     with proper data leakage prevention:
@@ -1296,9 +1377,12 @@ def train_and_evaluate_timeseries(df):
         df (pd.DataFrame): The preprocessed DataFrame (NOT scaled yet).
     """
     print("\n--- Starting Time-Series-Aware Model Training ---")
-    print(f"Using TimeSeriesSplit with {Config.N_SPLITS} splits and {Config.EMBARGO_DAYS}-day embargo period")
+    print(
+        f"Configured folds: {Config.N_SPLITS} | Min validation size: {Config.MIN_VALIDATION_SIZE} "
+        f"| Trading mode: {Config.TRADING_MODE}"
+    )
 
-    features = get_feature_columns(df)
+    features = get_feature_columns(df, feature_contract=feature_contract)
     target = 'target'
 
     X = df[features].copy()
@@ -1311,7 +1395,10 @@ def train_and_evaluate_timeseries(df):
     # Initialize visualization and logging engines
     viz_engine = None
     try:
-        from visualization_engine import VisualizationEngine as VizEngine
+        try:
+            from viewing.visualization_engine import VisualizationEngine as VizEngine
+        except ImportError:
+            from visualization_engine import VisualizationEngine as VizEngine
         viz_engine = VizEngine(output_dir='out')
         print("✅ VisualizationEngine loaded successfully")
     except ImportError as e:
@@ -1343,12 +1430,16 @@ def train_and_evaluate_timeseries(df):
         cv_splits = list(tscv.split(X))
     
     fold_results = []
+    skipped_folds = []
     all_val_predictions = []
     all_val_proba = []
     all_val_indices = []
     future_predictions = []  # Store future predictions from each fold
     prev_threshold_buy = Config.PROBABILITY_THRESHOLD_BUY
     prev_threshold_sell = Config.PROBABILITY_THRESHOLD_SELL
+    total_return_agg = 0.0
+    total_wins_agg = 0
+    total_trades_agg = 0
     tuned_params_cache = None
     
     for fold_idx, (train_idx, val_idx) in enumerate(cv_splits, start=1):
@@ -1368,10 +1459,15 @@ def train_and_evaluate_timeseries(df):
         
         if len(X_train_unscaled) < Config.MIN_TRAIN_SIZE:
             print(f"⚠️ Fold {fold_idx}: Skipped - insufficient training data ({len(X_train_unscaled)} < {Config.MIN_TRAIN_SIZE})")
+            skipped_folds.append({'fold': fold_idx, 'reason': 'insufficient_train_size'})
             continue
         
-        if len(X_val_unscaled) < 10:
-            print(f"⚠️ Fold {fold_idx}: Skipped - insufficient validation data")
+        if len(X_val_unscaled) < Config.MIN_VALIDATION_SIZE:
+            print(
+                f"⚠️ Fold {fold_idx}: Skipped - insufficient validation data "
+                f"({len(X_val_unscaled)} < {Config.MIN_VALIDATION_SIZE})"
+            )
+            skipped_folds.append({'fold': fold_idx, 'reason': 'insufficient_validation_size'})
             continue
         
         # Extract date information early for logging
@@ -1389,6 +1485,7 @@ def train_and_evaluate_timeseries(df):
             print(f"   └─ Only class {val_class} ({class_name}) found in {n_samples} samples")
             print(f"   └─ Window: {val_date_start} to {val_date_end}")
             print(f"   └─ Market condition: All trades hit " + ("profit target" if val_class == 1 else "stop loss"))
+            skipped_folds.append({'fold': fold_idx, 'reason': 'single_validation_class'})
             continue
         
         # === CRITICAL: Scale ONLY on training data ===
@@ -1399,7 +1496,7 @@ def train_and_evaluate_timeseries(df):
         X_train_scaled[features] = scaler.fit_transform(X_train_unscaled[features])
         X_val_scaled[features] = scaler.transform(X_val_unscaled[features])
         
-        print(f"\n--- Fold {fold_idx}/{Config.N_SPLITS} (TimeSeriesSplit) ---")
+        print(f"\n--- Fold {fold_idx}/{len(cv_splits)} (TimeSeriesSplit) ---")
         print(f"Train: {train_date_start} to {train_date_end} ({len(X_train_scaled)} samples)")
         print(f"Valid: {val_date_start} to {val_date_end} ({len(X_val_unscaled)} samples)")
         print(f"Class distribution in validation: {y_val.value_counts().to_dict()}")
@@ -1517,23 +1614,25 @@ def train_and_evaluate_timeseries(df):
         
         # Apply probability thresholding with intelligent position opening strategy
         threshold_buy = Config.PROBABILITY_THRESHOLD_BUY
-        threshold_sell = Config.PROBABILITY_THRESHOLD_SELL
+        threshold_sell = Config.PROBABILITY_THRESHOLD_SELL if Config.TRADING_MODE == "long_short" else None
         threshold_stats = None
         
         if Config.ENABLE_THRESHOLD_GRIDSEARCH:
             if Config.OPTIMIZE_BY_SHARPE:
-                # NEW: Optimize by Sharpe Ratio (better for trading)
-                # print(f"   📊 Optimizing thresholds by SHARPE RATIO (trading-focused)...")
-                threshold_buy, threshold_sell, threshold_stats = find_optimal_threshold_sharpe(
-                    y_val.values,
-                    proba_preds_risk_adjusted,
-                    val_returns,  # Use calculated returns
-                    min_samples=10
-                )
-                if threshold_stats:
-                    pass
-                    # print(f"   ✅ Sharpe-optimized thresholds: BUY={threshold_buy:.3f}, SELL={threshold_sell:.3f}")
-                    # print(f"      → Sharpe: {threshold_stats['sharpe']:.2f}, Win Rate: {threshold_stats['win_rate']:.1%}")
+                if Config.TRADING_MODE == "long_only":
+                    threshold_buy, threshold_stats = find_optimal_buy_threshold_sharpe(
+                        y_val.values,
+                        proba_preds_risk_adjusted,
+                        val_returns,  # Use calculated returns
+                        min_samples=10
+                    )
+                else:
+                    threshold_buy, threshold_sell, threshold_stats = find_optimal_thresholds_long_short(
+                        y_val.values,
+                        proba_preds_risk_adjusted,
+                        val_returns,
+                        min_samples=10
+                    )
             else:
                 # Original F1 optimization
                 threshold_buy, threshold_stats = find_optimal_threshold(
@@ -1555,11 +1654,11 @@ def train_and_evaluate_timeseries(df):
             adaptive_buy, adaptive_sell = get_adaptive_thresholds(
                 avg_vol_zscore, 
                 base_buy=threshold_buy, 
-                base_sell=threshold_sell
+                base_sell=threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL
             )
 
             # Smooth abrupt fold-to-fold jumps via EMA
-            threshold_buy, threshold_sell = smooth_thresholds(
+            threshold_buy, smoothed_sell = smooth_thresholds(
                 adaptive_buy,
                 adaptive_sell,
                 prev_threshold_buy,
@@ -1571,7 +1670,10 @@ def train_and_evaluate_timeseries(df):
             #     f"BUY={threshold_buy:.3f}, SELL={threshold_sell:.3f}"
             # )
 
-            prev_threshold_buy, prev_threshold_sell = threshold_buy, threshold_sell
+            if Config.TRADING_MODE == "long_short":
+                threshold_sell = smoothed_sell
+                prev_threshold_sell = threshold_sell
+            prev_threshold_buy = threshold_buy
         else:
             avg_vol_zscore = 0.0
         
@@ -1583,20 +1685,22 @@ def train_and_evaluate_timeseries(df):
             preds_thresholded = apply_probability_threshold(
                 proba_preds_risk_adjusted,
                 threshold_buy,
-                threshold_sell,  # Use optimized/adaptive threshold
+                threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
                 X_features=X_val_unscaled,  # Pass validation features for technical filters
                 percentile_threshold=Config.PERCENTILE_THRESHOLD,
-                mode='hybrid'
+                mode='hybrid',
+                trading_mode=Config.TRADING_MODE
             )
         else:
             # Simple threshold or percentile mode
             preds_thresholded = apply_probability_threshold(
                 proba_preds_risk_adjusted,
                 threshold_buy,
-                threshold_sell,  # Use optimized/adaptive threshold
+                threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
                 X_features=None,
                 percentile_threshold=Config.PERCENTILE_THRESHOLD,
-                mode=Config.POSITION_OPENING_MODE
+                mode=Config.POSITION_OPENING_MODE,
+                trading_mode=Config.TRADING_MODE
             )
         
         # Log position statistics with trading details
@@ -1726,6 +1830,9 @@ def train_and_evaluate_timeseries(df):
         else:
             win_rate = 0
             total_return = 0
+        total_return_agg += float(total_return)
+        total_wins_agg += int(np.sum(strategy_returns_thresholded > 0))
+        total_trades_agg += int(n_long_positions)
         
         fold_results.append({
             'fold': fold_idx,
@@ -1740,9 +1847,12 @@ def train_and_evaluate_timeseries(df):
             'recall': recall,
             'f1': f1,
             'threshold_buy': float(threshold_buy),
-            'threshold_sell': float(threshold_sell),
+            'threshold_sell': float(threshold_sell) if threshold_sell is not None else np.nan,
             'threshold_metric': 'sharpe' if Config.OPTIMIZE_BY_SHARPE else Config.THRESHOLD_OPTIM_METRIC if Config.ENABLE_THRESHOLD_GRIDSEARCH else 'static',
-            'adaptive_thresholds': Config.USE_ADAPTIVE_THRESHOLDS
+            'adaptive_thresholds': Config.USE_ADAPTIVE_THRESHOLDS,
+            'fold_total_return': float(total_return),
+            'fold_win_rate': float(win_rate),
+            'fold_trades': int(n_long_positions),
         })
         
         # Store predictions for visualization
@@ -1752,7 +1862,16 @@ def train_and_evaluate_timeseries(df):
         
         if threshold_stats:
             if Config.OPTIMIZE_BY_SHARPE:
-                print(f"  → Thresholds (sharpe): BUY={threshold_buy:.4f}, SELL={threshold_sell:.4f} | Sharpe: {threshold_stats['sharpe']:.2f} | WinRate: {threshold_stats['win_rate']:.1%}")
+                if Config.TRADING_MODE == "long_short":
+                    print(
+                        f"  → Thresholds (sharpe): BUY={threshold_buy:.4f}, SELL={threshold_sell:.4f} "
+                        f"| Sharpe: {threshold_stats['sharpe']:.2f} | WinRate: {threshold_stats['win_rate']:.1%}"
+                    )
+                else:
+                    print(
+                        f"  → Threshold (sharpe): BUY={threshold_buy:.4f} "
+                        f"| Sharpe: {threshold_stats['sharpe']:.2f} | WinRate: {threshold_stats['win_rate']:.1%}"
+                    )
             else:
                 print(f"  → Threshold tuned ({Config.THRESHOLD_OPTIM_METRIC}): {threshold_buy:.4f} | PR: {threshold_stats['precision']:.3f}/{threshold_stats['recall']:.3f} | F1: {threshold_stats['f1']:.3f}")
         print(f"  → AUC: {auc:.4f} | AUCPR: {aucpr:.4f} | Accuracy: {accuracy:.4f} ({accuracy_thresholded:.4f} w/ threshold)")
@@ -1844,11 +1963,22 @@ def train_and_evaluate_timeseries(df):
         print("\n❌ No valid folds to evaluate. Check data and parameters.")
         return
     
-    results_df = pd.DataFrame(fold_results)
+    cv_summary = summarize_cv_results(fold_results, skipped_folds)
+    results_df = cv_summary['results_df']
+    print(
+        f"\nConfigured folds: {cv_summary['configured_folds']} | "
+        f"Executed valid folds: {cv_summary['n_folds_valid']} | "
+        f"Skipped: {cv_summary['n_folds_skipped']}"
+    )
     print("\n" + "="*80)
-    print("--- CROSS-VALIDATION SUMMARY (TimeSeriesSplit) ---")
+    print("--- CROSS-VALIDATION SUMMARY (Valid Folds) ---")
     print("="*80)
     print(results_df.to_string(index=False))
+
+    if skipped_folds:
+        print("\n--- SKIPPED FOLDS REPORT ---")
+        for skipped in skipped_folds:
+            print(f"Fold {skipped.get('fold')}: {skipped.get('reason', 'unknown')}")
     
     print("\n--- AGGREGATE STATISTICS ---")
     print(f"AUC:                  {results_df['auc'].mean():.4f} ± {results_df['auc'].std():.4f}")
@@ -1869,7 +1999,15 @@ def train_and_evaluate_timeseries(df):
         'features_used': features,
         'train_size': len(X_train_scaled) if fold_results else 0,
         'test_size': sum(len(idx) for idx in all_val_indices) if all_val_indices else 0,
-        'fold_number': len(fold_results),
+        'fold_number': cv_summary['n_folds_valid'],
+        'cv': {
+            'n_folds_configured': cv_summary['configured_folds'],
+            'n_folds_total': cv_summary['n_folds_total'],
+            'n_folds_valid': cv_summary['n_folds_valid'],
+            'n_folds_skipped': cv_summary['n_folds_skipped'],
+            'skip_reasons': cv_summary['skip_reasons'],
+        },
+        'features_contract': feature_contract or {},
         'metrics': {
             'accuracy': float(results_df['accuracy'].mean()),
             'precision': float(results_df['precision'].mean()),
@@ -1881,8 +2019,8 @@ def train_and_evaluate_timeseries(df):
         },
         'sharpe_ratio': float(results_df['sharpe'].mean()),
         'max_drawdown': float(results_df['max_drawdown'].mean()),
-        'total_return': float(np.sum([s for s in results_df['sharpe']])),
-        'win_rate': float(np.mean([1 if s > 0 else 0 for s in results_df['sharpe']])),
+        'total_return': float(total_return_agg),
+        'win_rate': float(total_wins_agg / total_trades_agg) if total_trades_agg > 0 else 0.0,
         'xgb_params': Config.XGB_PARAMS,
         'lstm_config': {
             'window_size': 60,
@@ -1890,11 +2028,14 @@ def train_and_evaluate_timeseries(df):
             'horizons': [5, 10, 20]
         },
         'buy_signals': int(np.sum([np.sum(p > 0.65) for p in all_val_proba])),
-        'sell_signals': int(np.sum([np.sum(p < 0.35) for p in all_val_proba])),
+        'sell_signals': int(np.sum([np.sum(p < 0.35) for p in all_val_proba])) if Config.TRADING_MODE == "long_short" else 0,
         'hold_signals': int(np.sum([np.sum((p >= 0.35) & (p <= 0.65)) for p in all_val_proba])),
         'visualization_file': f'out/lstm_xgboost_hybrid_run_{run_number}_*',
         'forecast_file': f'out/future_forecast_run_{run_number}_*',
-        'notes': f'TimeSeriesSplit with {Config.N_SPLITS} folds, embargo period {Config.EMBARGO_DAYS} days'
+        'notes': (
+            f"Configured folds={cv_summary['configured_folds']}, valid={cv_summary['n_folds_valid']}, "
+            f"min_validation={Config.MIN_VALIDATION_SIZE}, trading_mode={Config.TRADING_MODE}"
+        )
     }
     
     run_logger.log_run(run_config)
@@ -1926,8 +2067,7 @@ def train_and_evaluate_timeseries(df):
     # Return future predictions for final recommendation
     return future_predictions
 
-# --- MAIN EXECUTION ---
-if __name__ == "__main__":
+def main():
     # Display Rich UI header
     ui.display_header()
     
@@ -1963,21 +2103,35 @@ if __name__ == "__main__":
         # 6. Remove known low-importance features (adaptive filtering)
         main_df, dropped_low_imp = filter_low_importance_features(main_df)
         
+        feature_contract = resolve_feature_contract(
+            main_df,
+            seed_features=Config.FEATURES_TO_SCALE,
+            removed_by_corr=dropped_corr,
+            removed_by_importance=dropped_low_imp,
+            min_features=Config.MIN_FEATURES,
+        )
         print(f"\n📊 Feature engineering summary:")
-        print(f"   • Correlation-based drops: {len(dropped_corr)}")
-        print(f"   • Low-importance drops: {len(dropped_low_imp)}")
-        print(f"   • Final feature count: {len([c for c in main_df.columns if c not in ['date', 'open', 'high', 'low', 'close', 'volume', 'target', 'vix_close', 'forward_return']])}")
+        print(f"   • Requested seed features: {len(feature_contract['requested'])}")
+        print(f"   • Available from seed: {len(feature_contract['available'])}")
+        print(f"   • Correlation-based drops: {len(feature_contract['removed_by_corr'])}")
+        print(f"   • Low-importance drops: {len(feature_contract['removed_by_importance'])}")
+        print(f"   • Final contract features: {len(feature_contract['final'])}")
+        if feature_contract['missing_unexpected']:
+            print(f"   • Unexpected missing: {feature_contract['missing_unexpected']}")
         
         # 7. Define target
         main_df = define_target(main_df)
         
         # 6. Basic preprocessing (NO scaling - done per fold)
-        processed_df = preprocess_data_raw(main_df.copy())
+        processed_df = preprocess_data_raw(main_df.copy(), feature_contract=feature_contract)
         
         # 7. Train and evaluate with TimeSeriesSplit (PREVENTS DATA LEAKAGE)
         if not processed_df.empty:
             print("\n👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑")
-            future_preds = train_and_evaluate_timeseries(processed_df)
+            future_preds = train_and_evaluate_timeseries(
+                processed_df,
+                feature_contract=feature_contract
+            )
             
             # === FINAL CONSOLIDATED RECOMMENDATION ===
             if future_preds and len(future_preds) > 0:
@@ -2032,3 +2186,7 @@ if __name__ == "__main__":
         
     ui.show_success("Pipeline finished.")
 
+
+# --- MAIN EXECUTION ---
+if __name__ == "__main__":
+    main()

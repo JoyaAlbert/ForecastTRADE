@@ -81,15 +81,20 @@ class ResultsViewer:
         print(f"                    LATEST {len(latest_runs)} RUNS")
         print("="*80 + "\n")
         
-        headers = ['Run #', 'Date', 'Ticker', 'Folds', 'Accuracy', 'AUC', 'Sharpe', 'Max DD']
+        headers = ['Run #', 'Date', 'Ticker', 'Valid/Configured', 'Skipped', 'Accuracy', 'AUC', 'Sharpe', 'Max DD']
         rows = []
         
         for run in latest_runs:
+            cv = run.get('cv', {})
+            configured = cv.get('n_folds_configured', run.get('fold', 0))
+            valid = cv.get('n_folds_valid', run.get('fold', 0))
+            skipped = cv.get('n_folds_skipped', max(configured - valid, 0))
             rows.append([
                 run['run_number'],
                 run['date'],
                 run['ticker'],
-                run['fold'],
+                f"{valid}/{configured}",
+                skipped,
                 f"{run['metrics']['accuracy']:.4f}",
                 f"{run['metrics']['auc_roc']:.4f}",
                 f"{run['financial_metrics']['sharpe_ratio']:.4f}",
