@@ -9,11 +9,14 @@ for a downstream model like XGBoost.
 """
 
 import os
+import contextlib
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("ABSL_LOG_SEVERITY_LEVEL", "3")
+os.environ.setdefault("GLOG_minloglevel", "3")
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, LSTM, Dropout, Dense, Bidirectional
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
@@ -29,6 +32,13 @@ class LstmConfig:
     REGULARIZATION_L2 = 0.0001  # Reduced from 0.001 to allow learning
     LATENT_DIM = 32  # Full hidden state dimension before compression
     COMPRESSED_LATENT_DIM = 10  # Bottleneck: reduce to 10 features (from 32) - 70% compression baseline
+
+
+@contextlib.contextmanager
+def _silence_tensorflow_stderr():
+    with open(os.devnull, "w") as devnull:
+        with contextlib.redirect_stderr(devnull):
+            yield
 
 def engineer_lstm_features(df):
     """Prepares a focused set of features for the LSTM model."""
@@ -76,6 +86,48 @@ def create_sequences(data, targets, window_size):
         X.append(data[i:(i + window_size)])
         y.append(targets[i + window_size])
     return np.array(X), np.array(y)
+
+
+def _fill_placeholder_lstm_features(df):
+    for h in LstmConfig.HORIZONS:
+        df[f'lstm_price_{h}d'] = df['close']
+        df[f'lstm_return_{h}d'] = 0.0
+        df[f'lstm_dir_{h}d'] = 0.5
+    df['lstm_return_confidence'] = 0.0
+    for i in range(LstmConfig.COMPRESSED_LATENT_DIM):
+        df[f'lstm_latent_{i}'] = 0.0
+    return df
+
+
+def generate_placeholder_lstm_features(df, ticker_name='AAPL'):
+    """Generate deterministic placeholder LSTM columns to preserve feature schema."""
+    return _fill_placeholder_lstm_features(df.copy())
+
+
+def _map_lstm_outputs_to_df(df, predicted_returns, predicted_directions, compressed_latent_vectors):
+    pred_start_idx = LstmConfig.WINDOW_SIZE - 1
+    for i, h in enumerate(LstmConfig.HORIZONS):
+        return_col_name = f'lstm_return_{h}d'
+        price_col_name = f'lstm_price_{h}d'
+        direction_col_name = f'lstm_dir_{h}d'
+
+        df[return_col_name] = np.nan
+        df.iloc[pred_start_idx:pred_start_idx + len(predicted_returns), df.columns.get_loc(return_col_name)] = predicted_returns[:, i]
+        df[price_col_name] = df['close'] * (1 + df[return_col_name])
+        df[direction_col_name] = np.nan
+        df.iloc[pred_start_idx:pred_start_idx + len(predicted_directions), df.columns.get_loc(direction_col_name)] = predicted_directions[:, i]
+
+    df['lstm_return_confidence'] = np.nan
+    confidence_values = np.mean(np.abs(predicted_returns), axis=1)
+    df.iloc[pred_start_idx:pred_start_idx + len(confidence_values), df.columns.get_loc('lstm_return_confidence')] = confidence_values
+
+    compressed_latent_dim = compressed_latent_vectors.shape[1]
+    for latent_idx in range(compressed_latent_dim):
+        col_name = f'lstm_latent_{latent_idx}'
+        df[col_name] = np.nan
+        df.iloc[pred_start_idx:pred_start_idx + len(compressed_latent_vectors), df.columns.get_loc(col_name)] = compressed_latent_vectors[:, latent_idx]
+
+    return df.bfill().ffill()
 
 def build_feature_lstm(input_shape, n_outputs, latent_dim=32, compressed_dim=10):
     """
@@ -160,6 +212,71 @@ def build_feature_lstm(input_shape, n_outputs, latent_dim=32, compressed_dim=10)
     
     return model, latent_model, compressed_latent_model
 
+
+def generate_lstm_regime_features_train_only(train_df, full_df, ticker_name='AAPL'):
+    """
+    Leakage-safe LSTM feature generation:
+    - Fit scaler/model only on training window
+    - Apply trained model to train+validation block
+    """
+    train_df_lstm, feature_names = engineer_lstm_features(train_df.copy())
+    full_df_lstm, _ = engineer_lstm_features(full_df.copy())
+
+    if len(train_df_lstm) < LstmConfig.WINDOW_SIZE + max(LstmConfig.HORIZONS):
+        return _fill_placeholder_lstm_features(full_df.copy())
+
+    scaler = StandardScaler()
+    scaled_train = scaler.fit_transform(train_df_lstm)
+    scaled_full = scaler.transform(full_df_lstm)
+
+    targets_df = create_return_targets(train_df_lstm, LstmConfig.HORIZONS)
+    X_train, y_all = create_sequences(scaled_train, targets_df.values, LstmConfig.WINDOW_SIZE)
+
+    MIN_SEQUENCES_REQUIRED = 120
+    if len(X_train) < MIN_SEQUENCES_REQUIRED:
+        return _fill_placeholder_lstm_features(full_df.copy())
+
+    n_horizons = len(LstmConfig.HORIZONS)
+    y_returns = y_all[:, :n_horizons]
+    y_directions = y_all[:, n_horizons:]
+
+    model, _, compressed_latent_model = build_feature_lstm(
+        input_shape=(LstmConfig.WINDOW_SIZE, len(feature_names)),
+        n_outputs=len(LstmConfig.HORIZONS),
+        latent_dim=LstmConfig.LATENT_DIM,
+        compressed_dim=LstmConfig.COMPRESSED_LATENT_DIM
+    )
+    callbacks = [
+        EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True),
+        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2)
+    ]
+    validation_split = 0.1 if len(X_train) > 100 else 0.0
+
+    with _silence_tensorflow_stderr():
+        model.fit(
+            X_train,
+            {'return_predictions': y_returns, 'direction_predictions': y_directions},
+            epochs=max(20, min(LstmConfig.EPOCHS, 50)),
+            batch_size=min(LstmConfig.BATCH_SIZE, max(8, len(X_train)//10)),
+            validation_split=validation_split,
+            callbacks=callbacks,
+            verbose=0
+        )
+
+        full_sequences = []
+        for i in range(len(scaled_full) - LstmConfig.WINDOW_SIZE + 1):
+            full_sequences.append(scaled_full[i:i + LstmConfig.WINDOW_SIZE])
+        if not full_sequences:
+            return _fill_placeholder_lstm_features(full_df.copy())
+        full_sequences_arr = np.array(full_sequences)
+        predictions_dict = model.predict(full_sequences_arr, verbose=0)
+        predicted_returns = predictions_dict['return_predictions']
+        predicted_directions = predictions_dict['direction_predictions']
+        compressed_latent_vectors = compressed_latent_model.predict(full_sequences_arr, verbose=0)
+
+    out_df = full_df.copy()
+    return _map_lstm_outputs_to_df(out_df, predicted_returns, predicted_directions, compressed_latent_vectors)
+
 def generate_lstm_regime_features(df, ticker_name='AAPL'):
     """
     Trains an LSTM on the input data and uses bottleneck-compressed latent features
@@ -179,12 +296,7 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
     df_lstm, feature_names = engineer_lstm_features(df)
     if len(df_lstm) < LstmConfig.WINDOW_SIZE + max(LstmConfig.HORIZONS):
         print("⚠️ Not enough data for LSTM feature generation. Skipping.")
-        for h in LstmConfig.HORIZONS:
-            df[f'lstm_price_{h}d'] = df['close']
-        # Add placeholder compressed latent features
-        for i in range(LstmConfig.COMPRESSED_LATENT_DIM):
-            df[f'lstm_latent_{i}'] = 0.0
-        return df
+        return _fill_placeholder_lstm_features(df)
 
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(df_lstm)
@@ -204,13 +316,7 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
     if len(X) < MIN_SEQUENCES_REQUIRED:
         print(f"⚠️ Only {len(X)} sequences (need {MIN_SEQUENCES_REQUIRED}+ for stable LSTM).")
         print(f"   LSTM skipped due to insufficient data for generalization.")
-        for h in LstmConfig.HORIZONS:
-            df[f'lstm_price_{h}d'] = df['close']
-        # Use small random noise instead of zeros for placeholder features
-        np.random.seed(42)
-        for i in range(LstmConfig.COMPRESSED_LATENT_DIM):
-            df[f'lstm_latent_{i}'] = np.random.normal(0, 0.01, len(df))
-        return df
+        return _fill_placeholder_lstm_features(df)
 
     # 2. Build and train LSTM with bottleneck compression
     print(f"   Training LSTM with dual-task learning on {len(X)} sequences...")
@@ -243,15 +349,16 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
     elif validation_split == 0.05:
         print(f"   ⚠️ Using minimal validation split (5% with {len(X)} sequences)")
     
-    model.fit(
-        X, 
-        {'return_predictions': y_returns, 'direction_predictions': y_directions},
-        epochs=LstmConfig.EPOCHS, 
-        batch_size=min(LstmConfig.BATCH_SIZE, max(8, len(X)//10)),  # Batch size adaptive to data size
-        validation_split=validation_split,
-        callbacks=callbacks, 
-        verbose=0
-    )
+    with _silence_tensorflow_stderr():
+        model.fit(
+            X,
+            {'return_predictions': y_returns, 'direction_predictions': y_directions},
+            epochs=LstmConfig.EPOCHS,
+            batch_size=min(LstmConfig.BATCH_SIZE, max(8, len(X)//10)),
+            validation_split=validation_split,
+            callbacks=callbacks,
+            verbose=0
+        )
     print("   ✅ LSTM training completed (dual-task: returns + directions).")
 
     # 3. Generate features for the entire dataset
@@ -262,48 +369,24 @@ def generate_lstm_regime_features(df, ticker_name='AAPL'):
     
     if not full_sequences:
         print("⚠️ Could not create sequences for prediction. Skipping LSTM features.")
-        for h in LstmConfig.HORIZONS:
-            df[f'lstm_price_{h}d'] = df['close']
-        for i in range(LstmConfig.COMPRESSED_LATENT_DIM):
-            df[f'lstm_latent_{i}'] = 0.0
-        return df
+        return _fill_placeholder_lstm_features(df)
 
     # Get predictions and compressed latent vectors
     full_sequences_arr = np.array(full_sequences)
-    predictions_dict = model.predict(full_sequences_arr, verbose=0)
-    predicted_returns = predictions_dict['return_predictions']
-    predicted_directions = predictions_dict['direction_predictions']
-    compressed_latent_vectors = compressed_latent_model.predict(full_sequences_arr, verbose=0)
-    
-    # 4. Map predictions back to the original dataframe
-    pred_start_idx = LstmConfig.WINDOW_SIZE - 1
-    
-    # Add return predictions (for backward compatibility)
-    for i, h in enumerate(LstmConfig.HORIZONS):
-        return_col_name = f'lstm_return_{h}d'
-        price_col_name = f'lstm_price_{h}d'
-        
-        df[return_col_name] = np.nan
-        df.iloc[pred_start_idx:pred_start_idx + len(predicted_returns), df.columns.get_loc(return_col_name)] = predicted_returns[:, i]
-        
-        df[price_col_name] = df['close'] * (1 + df[return_col_name])
-    
-    # Add COMPRESSED latent vector features (10 dimensions instead of 32)
-    # These preserve dynamic range via linear activation (will be standardized with other features)
+    with _silence_tensorflow_stderr():
+        predictions_dict = model.predict(full_sequences_arr, verbose=0)
+        predicted_returns = predictions_dict['return_predictions']
+        predicted_directions = predictions_dict['direction_predictions']
+        compressed_latent_vectors = compressed_latent_model.predict(full_sequences_arr, verbose=0)
+
     print("   Extracting compressed latent space features...")
     print(f"   Dimensionality reduction: {LstmConfig.LATENT_DIM}d → {LstmConfig.COMPRESSED_LATENT_DIM}d (noise filtering)")
+    df = _map_lstm_outputs_to_df(df, predicted_returns, predicted_directions, compressed_latent_vectors)
     compressed_latent_dim = compressed_latent_vectors.shape[1]
-    for latent_idx in range(compressed_latent_dim):
-        col_name = f'lstm_latent_{latent_idx}'
-        df[col_name] = np.nan
-        df.iloc[pred_start_idx:pred_start_idx + len(compressed_latent_vectors), df.columns.get_loc(col_name)] = compressed_latent_vectors[:, latent_idx]
-    
-    # Forward-fill to handle NaNs at the beginning
-    # Note: Using newer pandas syntax for future compatibility (pandas 2.0+)
-    df = df.bfill().ffill()
 
     print(f"   ✅ LSTM latent features generated: {compressed_latent_dim} dimensions (compressed)")
     print(f"   ✅ Dual-task training: Returns (MSE) + Directions (Binary CE)")
-    print(f"   ✅ Total LSTM features: {len(LstmConfig.HORIZONS)*2 + compressed_latent_dim} (returns + prices + compressed latent)")
+    total_features = len(LstmConfig.HORIZONS) * 3 + compressed_latent_dim + 1
+    print(f"   ✅ Total LSTM features: {total_features} (returns + prices + directions + confidence + compressed latent)")
     print(f"   ✅ Noise reduction: {LstmConfig.LATENT_DIM}d → {compressed_latent_dim}d = {100*(1-compressed_latent_dim/LstmConfig.LATENT_DIM):.1f}% compression")
     return df

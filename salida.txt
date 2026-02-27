@@ -1,0 +1,1712 @@
+Running 4 experiments in StageA for ticker=MSFT...
+--------------------------------------------------------------------------------
+StageA Experiment 1/4: {'LABEL_TP_MULTIPLIER': 1.8, 'LABEL_SL_MULTIPLIER': 1.2, 'LABEL_HORIZON_DAYS': 15, 'USE_SYNTHETIC_SAMPLING': True}
+Fetching data for MSFT and ^VIX from 2020-02-29 to 2026-02-27...
+✅ Datos obtenidos: 1506 registros
+🧠 --- LSTM Module: Dual-Task Learning (Returns + Directions) --- 🧠
+   Training LSTM with dual-task learning on 1426 sequences...
+   Tasks: (1) Returns regression (MSE) + (2) Direction classification (BCE)
+   Architecture: Full latent dim=32 → Compressed dim=10
+   ✅ LSTM training completed (dual-task: returns + directions).
+   Extracting compressed latent space features...
+   Dimensionality reduction: 32d → 10d (noise filtering)
+   ✅ LSTM latent features generated: 10 dimensions (compressed)
+   ✅ Dual-task training: Returns (MSE) + Directions (Binary CE)
+   ✅ Total LSTM features: 20 (returns + prices + directions + confidence + compressed latent)
+   ✅ Noise reduction: 32d → 10d = 68.8% compression
+Engineering features...
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                        🔧 FEATURE ENGINEERING IN PROGRESS                                         │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Processing technical indicators...
+
+✅ Total features created: 75
+
+
+🚀 Creating Advanced Feature Interactions (Optimized)...
+   📊 Adding high-impact technical ratios...
+   🧠 Creating selective LSTM×Technical interactions...
+   🔬 Adding essential combinations...
+   ✅ Total features after optimized engineering: 90
+
+🔍 Analyzing feature correlations (threshold=0.98)...
+   ⚠️ Dropping 'lstm_price_5d' (corr=0.991 with 'lstm_price_10d')
+   ⚠️ Dropping 'lstm_price_10d' (corr=0.988 with 'lstm_price_20d')
+   ⚠️ Dropping 'lstm_return_10d' (corr=0.990 with 'lstm_return_confidence')
+   ⚠️ Dropping 'rsi_14' (corr=1.000 with 'rsi')
+   ⚠️ Dropping 'lstm_price_20d' (corr=0.989 with 'bb_lower')
+   ⚠️ Dropping 'bb_lower' (corr=0.997 with 'bb_mid')
+   ⚠️ Dropping 'bb_mid' (corr=0.997 with 'bb_upper')
+   ⚠️ Dropping 'bb_upper' (corr=0.995 with 'KCLe_20_2')
+   ⚠️ Dropping 'KCLe_20_2' (corr=0.999 with 'KCBe_20_2')
+   ⚠️ Dropping 'KCBe_20_2' (corr=0.999 with 'KCUe_20_2')
+   ⚠️ Dropping 'sma_100' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'high_52w' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'KCUe_20_2' (corr=0.993 with 'HLC3')
+   ⚠️ Dropping 'roc_10' (corr=1.000 with 'price_momentum_10d')
+   ✅ Removed 14 redundant features (protected 20 important ones)
+
+🔍 Applying adaptive feature filtering...
+   ⚠️ Removing 9 known low-importance features:
+      lstm_latent_2, rsi, rolling_volatility_zscore, regime_state, regime_change, vix_change, volume_roc_10, volume_ratio, regime_change
+   ✅ Features dropped successfully
+
+📊 Defining target with Triple Barrier Method (No Leakage)...
+   Triple Barrier Config: Volatility=rolling_std_20d | TP=1.8x | SL=1.2x | Horizon=15d
+   Label Distribution:
+      BUY  (Hit TP): 541 (36.3%)
+      SELL (Hit SL): 736 (49.4%)
+      HOLD (Timeout): 214 (14.4%)
+      (HOLD samples will be dropped from training)
+Preprocessing data (handling NaNs)...
+   Rows before preprocessing: 1506
+   Rows dropped (NaN in features/target + HOLD labels): 386
+   Data shape after preprocessing: (1120, 75)
+   Final class distribution: SELL=656 (58.6%), BUY=464 (41.4%)
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only
+✅ VisualizationEngine loaded successfully
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 6 sliding window splits
+
+--- Fold 1/6 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-10-04 (400 samples)
+Valid: 2022-10-05 to 2023-05-02 (120 samples)
+Class distribution in validation: {1.0: 63, 0.0: 57}
+   ✅ Positions opened: 4/120 (3.3%)
+   📏 Position sizing: sized=4/4 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.972
+
+   📊 Backtest Results (Validation Period):
+      Period: 2022-10-05 to 2023-05-02
+      Winning trades: 3/4 (75.0% win rate)
+      Losing trades: 1
+      Avoided losses: 56 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000098
+      Std dev: 0.005009
+      Min/Max: -0.031031 / 0.039411
+      Long positions: 4
+  → Threshold (sharpe): BUY=0.6340 | Sharpe: 2.23 | WinRate: 50.0%
+  → AUC: 0.4833 | AUCPR: 0.5034 | Accuracy: 0.4833 (0.4917 w/ threshold)
+  → Sharpe: 0.9704 (0.0585 w/ threshold) | Max DD: -0.0310
+   Generating visualizations for Fold 1...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_6_fold1_2026-02-27_172138.png
+
+   🔮 Future Prediction Made: 22.4% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_6_fold1_2026-02-27_172138.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_6_fold1_2026-02-27_172138.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 22.4%
+
+   ❌ RECOMMENDATION: 🔴 AVOID/SELL (High risk)
+      Reason: High loss probability (77.6%)
+      Potential loss if stop hit: $28.88
+   ============================================================
+
+
+--- Fold 2/6 (TimeSeriesSplit) ---
+Train: 2021-06-23 to 2023-05-02 (400 samples)
+Valid: 2023-05-03 to 2023-11-07 (120 samples)
+Class distribution in validation: {1.0: 72, 0.0: 48}
+   ✅ Positions opened: 30/120 (25.0%)
+   📏 Position sizing: sized=30/30 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-05-03 to 2023-11-07
+      Winning trades: 12/30 (40.0% win rate)
+      Losing trades: 18
+      Avoided losses: 30 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000546
+      Std dev: 0.006164
+      Min/Max: -0.021499 / 0.023543
+      Long positions: 30
+  → Threshold (sharpe): BUY=0.6725 | Sharpe: 3.89 | WinRate: 61.1%
+  → AUC: 0.3659 | AUCPR: 0.5308 | Accuracy: 0.4083 (0.3500 w/ threshold)
+  → Sharpe: 1.0028 (1.2008 w/ threshold) | Max DD: -0.0452
+   Generating visualizations for Fold 2...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_6_fold2_2026-02-27_172138.png
+
+   🔮 Future Prediction Made: 66.1% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_6_fold2_2026-02-27_172138.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_6_fold2_2026-02-27_172138.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 66.1%
+
+   ✅ RECOMMENDATION: 🟢 BUY (High confidence)
+      Reason: Strong win probability (66.1%)
+      Expected profit if target hit: $57.77
+   ============================================================
+
+
+--- Fold 3/6 (TimeSeriesSplit) ---
+Train: 2022-01-28 to 2023-11-07 (400 samples)
+Valid: 2023-11-08 to 2024-06-11 (120 samples)
+Class distribution in validation: {0.0: 69, 1.0: 51}
+   ✅ Positions opened: 36/120 (30.0%)
+   📏 Position sizing: sized=36/36 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-11-08 to 2024-06-11
+      Winning trades: 15/36 (41.7% win rate)
+      Losing trades: 21
+      Avoided losses: 48 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000552
+      Std dev: 0.006606
+      Min/Max: -0.029572 / 0.026599
+      Long positions: 36
+  → Threshold (sharpe): BUY=0.6121 | Sharpe: 2.56 | WinRate: 50.7%
+  → AUC: 0.4922 | AUCPR: 0.4153 | Accuracy: 0.5333 (0.5250 w/ threshold)
+  → Sharpe: 1.8765 (1.1360 w/ threshold) | Max DD: -0.0323
+   Generating visualizations for Fold 3...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_6_fold3_2026-02-27_172138.png
+
+   🔮 Future Prediction Made: 62.9% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_6_fold3_2026-02-27_172138.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_6_fold3_2026-02-27_172138.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 62.9%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (62.9%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 4/6 (TimeSeriesSplit) ---
+Train: 2022-08-05 to 2024-06-11 (400 samples)
+Valid: 2024-06-12 to 2024-12-23 (120 samples)
+Class distribution in validation: {0.0: 73, 1.0: 47}
+   ✅ Positions opened: 34/120 (28.3%)
+   📏 Position sizing: sized=34/34 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.877
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-06-12 to 2024-12-23
+      Winning trades: 19/34 (55.9% win rate)
+      Losing trades: 15
+      Avoided losses: 58 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000178
+      Std dev: 0.004421
+      Min/Max: -0.024435 / 0.019272
+      Long positions: 34
+  → Threshold (sharpe): BUY=0.6665 | Sharpe: 1.56 | WinRate: 65.6%
+  → AUC: 0.8175 | AUCPR: 0.6502 | Accuracy: 0.7167 (0.6417 w/ threshold)
+  → Sharpe: 0.6037 (0.3555 w/ threshold) | Max DD: -0.0348
+   Generating visualizations for Fold 4...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_6_fold4_2026-02-27_172138.png
+
+   🔮 Future Prediction Made: 61.0% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_6_fold4_2026-02-27_172138.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_6_fold4_2026-02-27_172138.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 61.0%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (61.0%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 5/6 (TimeSeriesSplit) ---
+Train: 2023-02-13 to 2024-12-23 (400 samples)
+Valid: 2024-12-24 to 2025-07-25 (120 samples)
+Class distribution in validation: {0.0: 65, 1.0: 55}
+   ✅ Positions opened: 16/120 (13.3%)
+   📏 Position sizing: sized=16/16 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.858
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-12-24 to 2025-07-25
+      Winning trades: 11/16 (68.8% win rate)
+      Losing trades: 5
+      Avoided losses: 60 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000188
+      Std dev: 0.004120
+      Min/Max: -0.014849 / 0.035452
+      Long positions: 16
+  → Threshold (sharpe): BUY=0.6082 | Sharpe: -0.25 | WinRate: 51.4%
+  → AUC: 0.5129 | AUCPR: 0.4458 | Accuracy: 0.5417 (0.5917 w/ threshold)
+  → Sharpe: -0.4976 (0.4171 w/ threshold) | Max DD: -0.0394
+   Generating visualizations for Fold 5...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_6_fold5_2026-02-27_172138.png
+
+   🔮 Future Prediction Made: 55.5% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_6_fold5_2026-02-27_172138.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_6_fold5_2026-02-27_172138.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 55.5%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (55.5%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 6/6 (TimeSeriesSplit) ---
+Train: 2023-09-12 to 2025-07-25 (400 samples)
+Valid: 2025-07-28 to 2026-02-04 (120 samples)
+Class distribution in validation: {0.0: 82, 1.0: 38}
+   ✅ Positions opened: 36/120 (30.0%)
+   📏 Position sizing: sized=36/36 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.993
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-07-28 to 2026-02-04
+      Winning trades: 19/36 (52.8% win rate)
+      Losing trades: 17
+      Avoided losses: 65 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000281
+      Std dev: 0.005469
+      Min/Max: -0.023822 / 0.021538
+      Long positions: 36
+  → Threshold (sharpe): BUY=0.6582 | Sharpe: 1.31 | WinRate: 55.9%
+  → AUC: 0.7977 | AUCPR: 0.5701 | Accuracy: 0.6083 (0.7000 w/ threshold)
+  → Sharpe: -0.2429 (0.5850 w/ threshold) | Max DD: -0.0432
+   Generating visualizations for Fold 6...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_6_fold6_2026-02-27_172138.png
+
+   🔮 Future Prediction Made: 59.8% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_6_fold6_2026-02-27_172138.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_6_fold6_2026-02-27_172138.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 59.8%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (59.8%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+Configured folds: 6 | Executed valid folds: 6 | Skipped: 0
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  calibration_enabled calibration_method
+    1 0.483292 0.503367  0.483333              0.491667  0.970431     -0.031031            0.058516   0.750000 0.047619 0.089552       0.633976             NaN           sharpe                 True           0.011739       0.500000            4                     56                  0.466667                False               none
+    2 0.365885 0.530836  0.408333              0.350000  1.002751     -0.045168            1.200806   0.400000 0.166667 0.235294       0.672458             NaN           sharpe                 True           0.065474       0.633333           30                     54                  0.450000                False               none
+    3 0.492185 0.415314  0.533333              0.525000  1.876521     -0.032274            1.136035   0.416667 0.294118 0.344827       0.612098             NaN           sharpe                 True           0.066253       0.527778           36                     75                  0.625000                False               none
+    4 0.817546 0.650193  0.716667              0.641667  0.603677     -0.034794            0.355498   0.558824 0.404255 0.469135       0.666470             NaN           sharpe                 True           0.021405       0.617647           34                     64                  0.533333                False               none
+    5 0.512867 0.445816  0.541667              0.591667 -0.497634     -0.039367            0.417140   0.687500 0.200000 0.309859       0.608206             NaN           sharpe                 True           0.022517       0.500000           16                     72                  0.600000                False               none
+    6 0.797657 0.570081  0.608333              0.700000 -0.242891     -0.043183            0.585028   0.527778 0.500000 0.513513       0.658200             NaN           sharpe                 True           0.033709       0.527778           36                     59                  0.491667                False               none
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5782 ± 0.1850
+AUCPR:                0.5193 ± 0.0852
+Accuracy:             0.5486 ± 0.1059
+Accuracy (threshold): 0.5500 ± 0.1238
+Sharpe Ratio:         0.6188 ± 0.8766
+Sharpe (threshold):   0.6255 ± 0.4541
+Max Drawdown:         -0.0376 ± 0.0058
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 6 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:   6                                    ║
+║ Best AUC: 0.5782                              ║
+║ Best Accuracy: 0.5542                      ║
+║ Best Sharpe Ratio: 1.1531                  ║
+║                                                            ║
+║ Average AUC: 0.5432                         ║
+║ Average Accuracy: 0.5290                 ║
+║ Average Sharpe Ratio: 0.8767             ║
+║                                                            ║
+║ AUC Variance: 0.000505                      ║
+║ Accuracy Variance: 0.000322             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+               feature  importance
+                 macds    0.076640
+                ADX_14    0.062672
+          lstm_dir_10d    0.060992
+              ema_long    0.059939
+             ema_short    0.052546
+       close_vix_ratio    0.047176
+lstm_return_confidence    0.045188
+         lstm_latent_1    0.044520
+         lstm_latent_3    0.044490
+         volatility_20    0.043859
+         lstm_latent_9    0.043378
+          lstm_dir_20d    0.040920
+         lstm_latent_4    0.037429
+        price_to_sma20    0.034940
+                   mfi    0.032373
+Result: status=ok score=0.013670564566979015
+--------------------------------------------------------------------------------
+StageA Experiment 2/4: {'LABEL_TP_MULTIPLIER': 1.8, 'LABEL_SL_MULTIPLIER': 1.2, 'LABEL_HORIZON_DAYS': 15, 'USE_SYNTHETIC_SAMPLING': False}
+Fetching data for MSFT and ^VIX from 2020-02-29 to 2026-02-27...
+✅ Datos obtenidos: 1506 registros
+🧠 --- LSTM Module: Dual-Task Learning (Returns + Directions) --- 🧠
+   Training LSTM with dual-task learning on 1426 sequences...
+   Tasks: (1) Returns regression (MSE) + (2) Direction classification (BCE)
+   Architecture: Full latent dim=32 → Compressed dim=10
+   ✅ LSTM training completed (dual-task: returns + directions).
+   Extracting compressed latent space features...
+   Dimensionality reduction: 32d → 10d (noise filtering)
+   ✅ LSTM latent features generated: 10 dimensions (compressed)
+   ✅ Dual-task training: Returns (MSE) + Directions (Binary CE)
+   ✅ Total LSTM features: 20 (returns + prices + directions + confidence + compressed latent)
+   ✅ Noise reduction: 32d → 10d = 68.8% compression
+Engineering features...
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                        🔧 FEATURE ENGINEERING IN PROGRESS                                         │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Processing technical indicators...
+
+✅ Total features created: 75
+
+
+🚀 Creating Advanced Feature Interactions (Optimized)...
+   📊 Adding high-impact technical ratios...
+   🧠 Creating selective LSTM×Technical interactions...
+   🔬 Adding essential combinations...
+   ✅ Total features after optimized engineering: 90
+
+🔍 Analyzing feature correlations (threshold=0.98)...
+   ⚠️ Dropping 'lstm_price_5d' (corr=0.990 with 'lstm_price_10d')
+   ⚠️ Dropping 'lstm_price_10d' (corr=0.994 with 'lstm_price_20d')
+   ⚠️ Dropping 'lstm_return_10d' (corr=0.992 with 'lstm_return_confidence')
+   ⚠️ Dropping 'rsi_14' (corr=1.000 with 'rsi')
+   ⚠️ Dropping 'lstm_price_20d' (corr=0.990 with 'bb_lower')
+   ⚠️ Dropping 'bb_lower' (corr=0.997 with 'bb_mid')
+   ⚠️ Dropping 'bb_mid' (corr=0.997 with 'bb_upper')
+   ⚠️ Dropping 'bb_upper' (corr=0.995 with 'KCLe_20_2')
+   ⚠️ Dropping 'KCLe_20_2' (corr=0.999 with 'KCBe_20_2')
+   ⚠️ Dropping 'KCBe_20_2' (corr=0.999 with 'KCUe_20_2')
+   ⚠️ Dropping 'sma_100' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'high_52w' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'KCUe_20_2' (corr=0.993 with 'HLC3')
+   ⚠️ Dropping 'roc_10' (corr=1.000 with 'price_momentum_10d')
+   ✅ Removed 14 redundant features (protected 20 important ones)
+
+🔍 Applying adaptive feature filtering...
+   ⚠️ Removing 9 known low-importance features:
+      lstm_latent_2, rsi, rolling_volatility_zscore, regime_state, regime_change, vix_change, volume_roc_10, volume_ratio, regime_change
+   ✅ Features dropped successfully
+
+📊 Defining target with Triple Barrier Method (No Leakage)...
+   Triple Barrier Config: Volatility=rolling_std_20d | TP=1.8x | SL=1.2x | Horizon=15d
+   Label Distribution:
+      BUY  (Hit TP): 541 (36.3%)
+      SELL (Hit SL): 736 (49.4%)
+      HOLD (Timeout): 214 (14.4%)
+      (HOLD samples will be dropped from training)
+Preprocessing data (handling NaNs)...
+   Rows before preprocessing: 1506
+   Rows dropped (NaN in features/target + HOLD labels): 386
+   Data shape after preprocessing: (1120, 75)
+   Final class distribution: SELL=656 (58.6%), BUY=464 (41.4%)
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only
+✅ VisualizationEngine loaded successfully
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 6 sliding window splits
+
+--- Fold 1/6 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-10-04 (400 samples)
+Valid: 2022-10-05 to 2023-05-02 (120 samples)
+Class distribution in validation: {1.0: 63, 0.0: 57}
+   ✅ Positions opened: 4/120 (3.3%)
+   📏 Position sizing: sized=4/4 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.965
+
+   📊 Backtest Results (Validation Period):
+      Period: 2022-10-05 to 2023-05-02
+      Winning trades: 4/4 (100.0% win rate)
+      Avoided losses: 57 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000569
+      Std dev: 0.004707
+      Min/Max: -0.013975 / 0.039411
+      Long positions: 4
+  → Threshold (sharpe): BUY=0.6865 | Sharpe: 3.02 | WinRate: 54.1%
+  → AUC: 0.5259 | AUCPR: 0.5447 | Accuracy: 0.5000 (0.5083 w/ threshold)
+  → Sharpe: 0.2097 (1.6502 w/ threshold) | Max DD: -0.0140
+   Generating visualizations for Fold 1...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_7_fold1_2026-02-27_172230.png
+
+   🔮 Future Prediction Made: 17.4% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_7_fold1_2026-02-27_172230.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_7_fold1_2026-02-27_172230.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 17.4%
+
+   ❌ RECOMMENDATION: 🔴 AVOID/SELL (High risk)
+      Reason: High loss probability (82.6%)
+      Potential loss if stop hit: $28.88
+   ============================================================
+
+
+--- Fold 2/6 (TimeSeriesSplit) ---
+Train: 2021-06-23 to 2023-05-02 (400 samples)
+Valid: 2023-05-03 to 2023-11-07 (120 samples)
+Class distribution in validation: {1.0: 72, 0.0: 48}
+   ✅ Positions opened: 29/120 (24.2%)
+   📏 Position sizing: sized=29/29 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-05-03 to 2023-11-07
+      Winning trades: 12/29 (41.4% win rate)
+      Losing trades: 17
+      Avoided losses: 31 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000648
+      Std dev: 0.006051
+      Min/Max: -0.021499 / 0.023543
+      Long positions: 29
+  → Threshold (sharpe): BUY=0.6716 | Sharpe: 3.89 | WinRate: 61.1%
+  → AUC: 0.3830 | AUCPR: 0.5411 | Accuracy: 0.4500 (0.3583 w/ threshold)
+  → Sharpe: 1.0515 (1.4913 w/ threshold) | Max DD: -0.0333
+   Generating visualizations for Fold 2...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_7_fold2_2026-02-27_172230.png
+
+   🔮 Future Prediction Made: 59.4% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_7_fold2_2026-02-27_172230.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_7_fold2_2026-02-27_172230.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 59.4%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (59.4%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 3/6 (TimeSeriesSplit) ---
+Train: 2022-01-28 to 2023-11-07 (400 samples)
+Valid: 2023-11-08 to 2024-06-11 (120 samples)
+Class distribution in validation: {0.0: 69, 1.0: 51}
+   ✅ Positions opened: 42/120 (35.0%)
+   📏 Position sizing: sized=42/42 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-11-08 to 2024-06-11
+      Winning trades: 19/42 (45.2% win rate)
+      Losing trades: 23
+      Avoided losses: 46 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000612
+      Std dev: 0.007437
+      Min/Max: -0.029572 / 0.028875
+      Long positions: 42
+  → Threshold (sharpe): BUY=0.6239 | Sharpe: 2.04 | WinRate: 48.7%
+  → AUC: 0.4734 | AUCPR: 0.4141 | Accuracy: 0.4667 (0.5417 w/ threshold)
+  → Sharpe: 1.2210 (1.1363 w/ threshold) | Max DD: -0.0323
+   Generating visualizations for Fold 3...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_7_fold3_2026-02-27_172230.png
+
+   🔮 Future Prediction Made: 87.0% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_7_fold3_2026-02-27_172230.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_7_fold3_2026-02-27_172230.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 87.0%
+
+   ✅ RECOMMENDATION: 🟢 BUY (High confidence)
+      Reason: Strong win probability (87.0%)
+      Expected profit if target hit: $57.77
+   ============================================================
+
+
+--- Fold 4/6 (TimeSeriesSplit) ---
+Train: 2022-08-05 to 2024-06-11 (400 samples)
+Valid: 2024-06-12 to 2024-12-23 (120 samples)
+Class distribution in validation: {0.0: 73, 1.0: 47}
+   ✅ Positions opened: 28/120 (23.3%)
+   📏 Position sizing: sized=28/28 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.877
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-06-12 to 2024-12-23
+      Winning trades: 18/28 (64.3% win rate)
+      Losing trades: 10
+      Avoided losses: 63 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000129
+      Std dev: 0.004252
+      Min/Max: -0.024435 / 0.019272
+      Long positions: 28
+  → Threshold (sharpe): BUY=0.6041 | Sharpe: 1.61 | WinRate: 69.2%
+  → AUC: 0.8286 | AUCPR: 0.7002 | Accuracy: 0.7083 (0.6750 w/ threshold)
+  → Sharpe: 0.7470 (0.1836 w/ threshold) | Max DD: -0.0271
+   Generating visualizations for Fold 4...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_7_fold4_2026-02-27_172230.png
+
+   🔮 Future Prediction Made: 55.9% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_7_fold4_2026-02-27_172230.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_7_fold4_2026-02-27_172230.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 55.9%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (55.9%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 5/6 (TimeSeriesSplit) ---
+Train: 2023-02-13 to 2024-12-23 (400 samples)
+Valid: 2024-12-24 to 2025-07-25 (120 samples)
+Class distribution in validation: {0.0: 65, 1.0: 55}
+   ✅ Positions opened: 2/120 (1.7%)
+   📏 Position sizing: sized=2/2 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.858
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-12-24 to 2025-07-25
+      Winning trades: 0/2 (0.0% win rate)
+      Losing trades: 2
+      Avoided losses: 63 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: -0.000106
+      Std dev: 0.000813
+      Min/Max: -0.006727 / 0.000000
+      Long positions: 2
+  → Threshold (sharpe): BUY=0.5677 | Sharpe: -0.15 | WinRate: 51.5%
+  → AUC: 0.4087 | AUCPR: 0.3895 | Accuracy: 0.4250 (0.5250 w/ threshold)
+  → Sharpe: -0.3953 (nan w/ threshold) | Max DD: nan
+   Generating visualizations for Fold 5...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_7_fold5_2026-02-27_172230.png
+
+   🔮 Future Prediction Made: 38.4% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_7_fold5_2026-02-27_172230.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_7_fold5_2026-02-27_172230.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 38.4%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (38.4%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 6/6 (TimeSeriesSplit) ---
+Train: 2023-09-12 to 2025-07-25 (400 samples)
+Valid: 2025-07-28 to 2026-02-04 (120 samples)
+Class distribution in validation: {0.0: 82, 1.0: 38}
+   ✅ Positions opened: 33/120 (27.5%)
+   📏 Position sizing: sized=33/33 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.993
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-07-28 to 2026-02-04
+      Winning trades: 17/33 (51.5% win rate)
+      Losing trades: 16
+      Avoided losses: 66 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000316
+      Std dev: 0.005401
+      Min/Max: -0.023822 / 0.021538
+      Long positions: 33
+  → Threshold (sharpe): BUY=0.6144 | Sharpe: 2.04 | WinRate: 56.9%
+  → AUC: 0.7946 | AUCPR: 0.5660 | Accuracy: 0.6333 (0.6917 w/ threshold)
+  → Sharpe: -0.3034 (0.6965 w/ threshold) | Max DD: -0.0378
+   Generating visualizations for Fold 6...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_7_fold6_2026-02-27_172230.png
+
+   🔮 Future Prediction Made: 57.6% probability of winning
+      Based on latest market conditions as of 2026-02-04
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_7_fold6_2026-02-27_172230.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_7_fold6_2026-02-27_172230.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-02-04
+   💰 Entry Price: $413.25
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $471.02 (+13.98%)
+   🛑 Stop Loss: $384.36 (-6.99%)
+   📊 Win Probability: 57.6%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (57.6%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+Configured folds: 6 | Executed valid folds: 6 | Skipped: 0
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  calibration_enabled calibration_method
+    1 0.525898 0.544670  0.500000              0.508333  0.209665     -0.013975            1.650209   1.000000 0.063492 0.119403       0.686476             NaN           sharpe                 True           0.068246       0.750000            4                     37                  0.308333                False               none
+    2 0.382957 0.541125  0.450000              0.358333  1.051454     -0.033309            1.491343   0.413793 0.166667 0.237623       0.671583             NaN           sharpe                 True           0.077741       0.655172           29                     54                  0.450000                False               none
+    3 0.473430 0.414083  0.466667              0.541667  1.221020     -0.032274            1.136338   0.452381 0.372549 0.408602       0.623905             NaN           sharpe                 True           0.073411       0.500000           42                     76                  0.633333                False               none
+    4 0.828621 0.700188  0.708333              0.675000  0.747022     -0.027119            0.183631   0.642857 0.382979 0.480000       0.604145             NaN           sharpe                 True           0.015427       0.642857           28                     65                  0.541667                False               none
+    5 0.408671 0.389464  0.425000              0.525000 -0.395256           NaN                 NaN   0.000000 0.000000 0.000000       0.567694             NaN           sharpe                 True          -0.012673       0.000000            2                     68                  0.566667                False               none
+    6 0.794608 0.565974  0.633333              0.691667 -0.303417     -0.037842            0.696531   0.515151 0.447368 0.478873       0.614368             NaN           sharpe                 True           0.037963       0.515152           33                     58                  0.483333                False               none
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5690 ± 0.1947
+AUCPR:                0.5259 ± 0.1129
+Accuracy:             0.5306 ± 0.1139
+Accuracy (threshold): 0.5500 ± 0.1224
+Sharpe Ratio:         0.4217 ± 0.6899
+Sharpe (threshold):   1.0316 ± 0.5992
+Max Drawdown:         -0.0289 ± 0.0092
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 7 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:   7                                    ║
+║ Best AUC: 0.5782                              ║
+║ Best Accuracy: 0.5542                      ║
+║ Best Sharpe Ratio: 1.1531                  ║
+║                                                            ║
+║ Average AUC: 0.5469                         ║
+║ Average Accuracy: 0.5293                 ║
+║ Average Sharpe Ratio: 0.8117             ║
+║                                                            ║
+║ AUC Variance: 0.000515                      ║
+║ Accuracy Variance: 0.000276             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+               feature  importance
+         lstm_latent_1    0.080845
+                ADX_14    0.068213
+         lstm_latent_0    0.064774
+         lstm_latent_7    0.059234
+         lstm_latent_3    0.058775
+         lstm_latent_4    0.058713
+                 macds    0.058557
+              ema_long    0.055411
+         lstm_latent_5    0.049759
+         lstm_latent_6    0.046110
+         volatility_20    0.043549
+           lstm_dir_5d    0.043415
+lstm_return_confidence    0.040868
+                   atr    0.036289
+                  macd    0.036095
+
+⚠️ Features with <1% importance (2 total):
+   roc_20, lstm_dir_20d...
+   💡 Consider removing these in future runs for better performance
+Result: status=ok score=0.016662797849012062
+--------------------------------------------------------------------------------
+StageA Experiment 3/4: {'LABEL_TP_MULTIPLIER': 1.8, 'LABEL_SL_MULTIPLIER': 1.2, 'LABEL_HORIZON_DAYS': 20, 'USE_SYNTHETIC_SAMPLING': True}
+Fetching data for MSFT and ^VIX from 2020-02-29 to 2026-02-27...
+✅ Datos obtenidos: 1506 registros
+🧠 --- LSTM Module: Dual-Task Learning (Returns + Directions) --- 🧠
+   Training LSTM with dual-task learning on 1426 sequences...
+   Tasks: (1) Returns regression (MSE) + (2) Direction classification (BCE)
+   Architecture: Full latent dim=32 → Compressed dim=10
+   ✅ LSTM training completed (dual-task: returns + directions).
+   Extracting compressed latent space features...
+   Dimensionality reduction: 32d → 10d (noise filtering)
+   ✅ LSTM latent features generated: 10 dimensions (compressed)
+   ✅ Dual-task training: Returns (MSE) + Directions (Binary CE)
+   ✅ Total LSTM features: 20 (returns + prices + directions + confidence + compressed latent)
+   ✅ Noise reduction: 32d → 10d = 68.8% compression
+Engineering features...
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                       🔧 FEATURE ENGINEERING IN PROGRESS                                                       │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Processing technical indicators...
+
+✅ Total features created: 75
+
+
+🚀 Creating Advanced Feature Interactions (Optimized)...
+   📊 Adding high-impact technical ratios...
+   🧠 Creating selective LSTM×Technical interactions...
+   🔬 Adding essential combinations...
+   ✅ Total features after optimized engineering: 90
+
+🔍 Analyzing feature correlations (threshold=0.98)...
+   ⚠️ Dropping 'lstm_price_5d' (corr=0.989 with 'lstm_price_10d')
+   ⚠️ Dropping 'lstm_price_10d' (corr=0.991 with 'lstm_price_20d')
+   ⚠️ Dropping 'lstm_return_10d' (corr=0.991 with 'lstm_return_confidence')
+   ⚠️ Dropping 'rsi_14' (corr=1.000 with 'rsi')
+   ⚠️ Dropping 'lstm_price_20d' (corr=0.987 with 'bb_lower')
+   ⚠️ Dropping 'bb_lower' (corr=0.997 with 'bb_mid')
+   ⚠️ Dropping 'bb_mid' (corr=0.997 with 'bb_upper')
+   ⚠️ Dropping 'bb_upper' (corr=0.995 with 'KCLe_20_2')
+   ⚠️ Dropping 'KCLe_20_2' (corr=0.999 with 'KCBe_20_2')
+   ⚠️ Dropping 'KCBe_20_2' (corr=0.999 with 'KCUe_20_2')
+   ⚠️ Dropping 'sma_100' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'high_52w' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'KCUe_20_2' (corr=0.993 with 'HLC3')
+   ⚠️ Dropping 'roc_10' (corr=1.000 with 'price_momentum_10d')
+   ✅ Removed 14 redundant features (protected 20 important ones)
+
+🔍 Applying adaptive feature filtering...
+   ⚠️ Removing 9 known low-importance features:
+      lstm_latent_2, rsi, rolling_volatility_zscore, regime_state, regime_change, vix_change, volume_roc_10, volume_ratio, regime_change
+   ✅ Features dropped successfully
+
+📊 Defining target with Triple Barrier Method (No Leakage)...
+   Triple Barrier Config: Volatility=rolling_std_20d | TP=1.8x | SL=1.2x | Horizon=20d
+   Label Distribution:
+      BUY  (Hit TP): 599 (40.3%)
+      SELL (Hit SL): 765 (51.5%)
+      HOLD (Timeout): 122 (8.2%)
+      (HOLD samples will be dropped from training)
+Preprocessing data (handling NaNs)...
+   Rows before preprocessing: 1506
+   Rows dropped (NaN in features/target + HOLD labels): 316
+   Data shape after preprocessing: (1190, 75)
+   Final class distribution: SELL=685 (57.6%), BUY=505 (42.4%)
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only
+✅ VisualizationEngine loaded successfully
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 7 sliding window splits
+
+--- Fold 1/7 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-08-16 (400 samples)
+Valid: 2022-08-17 to 2023-02-09 (120 samples)
+Class distribution in validation: {0.0: 76, 1.0: 44}
+   ✅ Positions opened: 0/120 (0.0%)
+   📏 Position sizing: sized=0/0 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.000
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000000
+      Std dev: 0.000000
+      Min/Max: 0.000000 / 0.000000
+      Long positions: 0
+  → Threshold (sharpe): BUY=0.5975 | Sharpe: 0.16 | WinRate: 48.2%
+  → AUC: 0.5999 | AUCPR: 0.4133 | Accuracy: 0.5667 (0.6333 w/ threshold)
+  → Sharpe: -0.3886 (nan w/ threshold) | Max DD: nan
+   Generating visualizations for Fold 1...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_8_fold1_2026-02-27_172321.png
+
+   🔮 Future Prediction Made: 69.8% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_8_fold1_2026-02-27_172321.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_8_fold1_2026-02-27_172321.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 69.8%
+
+   ✅ RECOMMENDATION: 🟢 BUY (High confidence)
+      Reason: Strong win probability (69.8%)
+      Expected profit if target hit: $30.74
+   ============================================================
+
+
+--- Fold 2/7 (TimeSeriesSplit) ---
+Train: 2021-06-07 to 2023-02-09 (400 samples)
+Valid: 2023-02-10 to 2023-08-22 (120 samples)
+Class distribution in validation: {1.0: 71, 0.0: 49}
+   ✅ Positions opened: 24/120 (20.0%)
+   📏 Position sizing: sized=24/24 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.990
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-02-10 to 2023-08-22
+      Winning trades: 9/24 (37.5% win rate)
+      Losing trades: 15
+      Avoided losses: 34 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000512
+      Std dev: 0.006674
+      Min/Max: -0.018968 / 0.040123
+      Long positions: 24
+  → Threshold (sharpe): BUY=0.6514 | Sharpe: 3.48 | WinRate: 54.2%
+  → AUC: 0.4116 | AUCPR: 0.5432 | Accuracy: 0.4417 (0.3583 w/ threshold)
+  → Sharpe: 1.6776 (1.0281 w/ threshold) | Max DD: -0.0392
+   Generating visualizations for Fold 2...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_8_fold2_2026-02-27_172321.png
+
+   🔮 Future Prediction Made: 56.6% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_8_fold2_2026-02-27_172321.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_8_fold2_2026-02-27_172321.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 56.6%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (56.6%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 3/7 (TimeSeriesSplit) ---
+Train: 2021-12-16 to 2023-08-22 (400 samples)
+Valid: 2023-08-23 to 2024-03-19 (120 samples)
+Class distribution in validation: {1.0: 69, 0.0: 51}
+   ✅ Positions opened: 40/120 (33.3%)
+   📏 Position sizing: sized=40/40 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-08-23 to 2024-03-19
+      Winning trades: 20/40 (50.0% win rate)
+      Losing trades: 20
+      Avoided losses: 31 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000926
+      Std dev: 0.007260
+      Min/Max: -0.029572 / 0.026599
+      Long positions: 40
+  → Threshold (sharpe): BUY=0.6773 | Sharpe: 3.01 | WinRate: 55.6%
+  → AUC: 0.3899 | AUCPR: 0.5144 | Accuracy: 0.4167 (0.4250 w/ threshold)
+  → Sharpe: 1.5184 (1.8514 w/ threshold) | Max DD: -0.0323
+   Generating visualizations for Fold 3...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_8_fold3_2026-02-27_172321.png
+
+   🔮 Future Prediction Made: 69.9% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_8_fold3_2026-02-27_172321.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_8_fold3_2026-02-27_172321.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 69.9%
+
+   ✅ RECOMMENDATION: 🟢 BUY (High confidence)
+      Reason: Strong win probability (69.9%)
+      Expected profit if target hit: $30.74
+   ============================================================
+
+
+--- Fold 4/7 (TimeSeriesSplit) ---
+Train: 2022-06-13 to 2024-03-19 (400 samples)
+Valid: 2024-03-20 to 2024-09-20 (120 samples)
+Class distribution in validation: {0.0: 85, 1.0: 35}
+   ✅ Positions opened: 28/120 (23.3%)
+   📏 Position sizing: sized=28/28 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.888
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-03-20 to 2024-09-20
+      Winning trades: 16/28 (57.1% win rate)
+      Losing trades: 12
+      Avoided losses: 73 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000587
+      Std dev: 0.004095
+      Min/Max: -0.014551 / 0.018566
+      Long positions: 28
+  → Threshold (sharpe): BUY=0.7084 | Sharpe: 0.98 | WinRate: 51.7%
+  → AUC: 0.6820 | AUCPR: 0.4313 | Accuracy: 0.5000 (0.7417 w/ threshold)
+  → Sharpe: -0.2552 (1.9663 w/ threshold) | Max DD: -0.0493
+   Generating visualizations for Fold 4...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_8_fold4_2026-02-27_172321.png
+
+   🔮 Future Prediction Made: 61.9% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_8_fold4_2026-02-27_172321.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_8_fold4_2026-02-27_172321.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 61.9%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (61.9%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 5/7 (TimeSeriesSplit) ---
+Train: 2022-12-13 to 2024-09-20 (400 samples)
+Valid: 2024-09-23 to 2025-03-18 (120 samples)
+Class distribution in validation: {0.0: 76, 1.0: 44}
+   ✅ Positions opened: 25/120 (20.8%)
+   📏 Position sizing: sized=25/25 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.878
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-09-23 to 2025-03-18
+      Winning trades: 14/25 (56.0% win rate)
+      Losing trades: 11
+      Avoided losses: 65 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000434
+      Std dev: 0.005302
+      Min/Max: -0.024460 / 0.036276
+      Long positions: 25
+  → Threshold (sharpe): BUY=0.6765 | Sharpe: 0.72 | WinRate: 58.7%
+  → AUC: 0.7700 | AUCPR: 0.5845 | Accuracy: 0.6917 (0.6583 w/ threshold)
+  → Sharpe: 0.4104 (1.0609 w/ threshold) | Max DD: -0.0271
+   Generating visualizations for Fold 5...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_8_fold5_2026-02-27_172321.png
+
+   🔮 Future Prediction Made: 61.3% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_8_fold5_2026-02-27_172321.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_8_fold5_2026-02-27_172321.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 61.3%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (61.3%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 6/7 (TimeSeriesSplit) ---
+Train: 2023-06-20 to 2025-03-18 (400 samples)
+Valid: 2025-03-19 to 2025-10-02 (120 samples)
+Class distribution in validation: {1.0: 71, 0.0: 49}
+   ✅ Positions opened: 20/120 (16.7%)
+   📏 Position sizing: sized=20/20 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.950
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-03-19 to 2025-10-02
+      Winning trades: 15/20 (75.0% win rate)
+      Losing trades: 5
+      Avoided losses: 44 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000021
+      Std dev: 0.003813
+      Min/Max: -0.024249 / 0.016852
+      Long positions: 20
+  → Threshold (sharpe): BUY=0.6524 | Sharpe: 0.89 | WinRate: 58.6%
+  → AUC: 0.4329 | AUCPR: 0.5649 | Accuracy: 0.4750 (0.4917 w/ threshold)
+  → Sharpe: 0.4427 (-0.2427 w/ threshold) | Max DD: -0.0511
+   Generating visualizations for Fold 6...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_8_fold6_2026-02-27_172321.png
+
+   🔮 Future Prediction Made: 68.7% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_8_fold6_2026-02-27_172321.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_8_fold6_2026-02-27_172321.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 68.7%
+
+   ✅ RECOMMENDATION: 🟢 BUY (High confidence)
+      Reason: Strong win probability (68.7%)
+      Expected profit if target hit: $30.74
+   ============================================================
+
+
+--- Fold 7/7 (TimeSeriesSplit) ---
+Train: 2024-01-05 to 2025-10-02 (400 samples)
+Valid: 2025-10-03 to 2026-01-28 (70 samples)
+Class distribution in validation: {0.0: 51, 1.0: 19}
+   ✅ Positions opened: 26/70 (37.1%)
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-10-03 to 2026-01-28
+      Winning trades: 13/26 (50.0% win rate)
+      Losing trades: 13
+      Avoided losses: 38 (correctly predicted losers)
+   📊 Returns stats (valid days: 70/70):
+      Mean return: 0.000061
+      Std dev: 0.005744
+      Min/Max: -0.023987 / 0.021688
+      Long positions: 26
+  → Threshold (sharpe): BUY=0.6152 | Sharpe: 0.35 | WinRate: 51.3%
+  → AUC: 0.7353 | AUCPR: 0.4520 | Accuracy: 0.5857 (0.7286 w/ threshold)
+  → Sharpe: -0.7326 (-0.0507 w/ threshold) | Max DD: -0.0348
+   Generating visualizations for Fold 7...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_8_fold7_2026-02-27_172321.png
+
+   🔮 Future Prediction Made: 58.9% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_8_fold7_2026-02-27_172321.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_8_fold7_2026-02-27_172321.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 58.9%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (58.9%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+Configured folds: 7 | Executed valid folds: 7 | Skipped: 0
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  calibration_enabled calibration_method
+    1 0.599880 0.413322  0.566667              0.633333 -0.388608           NaN                 NaN   0.000000 0.000000 0.000000       0.597500             NaN           sharpe                 True           0.000000       0.000000            0                     83                  0.691667                False               none
+    2 0.411613 0.543182  0.441667              0.358333  1.677565     -0.039191            1.028067   0.375000 0.126761 0.189473       0.651419             NaN           sharpe                 True           0.061389       0.500000           24                     59                  0.491667                False               none
+    3 0.389883 0.514404  0.416667              0.425000  1.518369     -0.032274            1.851408   0.500000 0.289855 0.366972       0.677332             NaN           sharpe                 True           0.111135       0.550000           40                     63                  0.525000                False               none
+    4 0.682017 0.431318  0.500000              0.741667 -0.255165     -0.049263            1.966347   0.571429 0.457143 0.507936       0.708389             NaN           sharpe                 True           0.070393       0.607143           28                     60                  0.500000                False               none
+    5 0.770036 0.584505  0.691667              0.658333  0.410437     -0.027148            1.060858   0.560000 0.318182 0.405797       0.676520             NaN           sharpe                 True           0.052042       0.600000           25                     63                  0.525000                False               none
+    6 0.432883 0.564870  0.475000              0.491667  0.442688     -0.051089           -0.242745   0.750000 0.211268 0.329670       0.652389             NaN           sharpe                 True           0.002526       0.550000           20                     70                  0.583333                False               none
+    7 0.735294 0.452015  0.585714              0.728571 -0.732594     -0.034808           -0.050723   0.500000 0.684210 0.577777       0.615167             NaN           sharpe                 True           0.004271       0.500000           26                     39                  0.557143                False               none
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5745 ± 0.1617
+AUCPR:                0.5005 ± 0.0683
+Accuracy:             0.5253 ± 0.0957
+Accuracy (threshold): 0.5767 ± 0.1517
+Sharpe Ratio:         0.3818 ± 0.9324
+Sharpe (threshold):   0.9355 ± 0.9259
+Max Drawdown:         -0.0390 ± 0.0095
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 8 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:   8                                    ║
+║ Best AUC: 0.5782                              ║
+║ Best Accuracy: 0.5542                      ║
+║ Best Sharpe Ratio: 1.1531                  ║
+║                                                            ║
+║ Average AUC: 0.5503                         ║
+║ Average Accuracy: 0.5288                 ║
+║ Average Sharpe Ratio: 0.7579             ║
+║                                                            ║
+║ AUC Variance: 0.000534                      ║
+║ Accuracy Variance: 0.000244             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+               feature  importance
+                ADX_14    0.079041
+         lstm_latent_3    0.076660
+         lstm_latent_4    0.069897
+              ema_long    0.058301
+                 macds    0.055030
+         volatility_20    0.054757
+          lstm_dir_10d    0.049095
+           lstm_dir_5d    0.048993
+             ema_short    0.042152
+lstm_return_confidence    0.039969
+         lstm_latent_1    0.039830
+                   mfi    0.034682
+                   atr    0.033035
+         lstm_latent_5    0.032309
+         lstm_latent_8    0.031464
+Result: status=ok score=0.005232486271555398
+--------------------------------------------------------------------------------
+StageA Experiment 4/4: {'LABEL_TP_MULTIPLIER': 1.8, 'LABEL_SL_MULTIPLIER': 1.2, 'LABEL_HORIZON_DAYS': 20, 'USE_SYNTHETIC_SAMPLING': False}
+Fetching data for MSFT and ^VIX from 2020-02-29 to 2026-02-27...
+✅ Datos obtenidos: 1506 registros
+🧠 --- LSTM Module: Dual-Task Learning (Returns + Directions) --- 🧠
+   Training LSTM with dual-task learning on 1426 sequences...
+   Tasks: (1) Returns regression (MSE) + (2) Direction classification (BCE)
+   Architecture: Full latent dim=32 → Compressed dim=10
+   ✅ LSTM training completed (dual-task: returns + directions).
+   Extracting compressed latent space features...
+   Dimensionality reduction: 32d → 10d (noise filtering)
+   ✅ LSTM latent features generated: 10 dimensions (compressed)
+   ✅ Dual-task training: Returns (MSE) + Directions (Binary CE)
+   ✅ Total LSTM features: 20 (returns + prices + directions + confidence + compressed latent)
+   ✅ Noise reduction: 32d → 10d = 68.8% compression
+Engineering features...
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                       🔧 FEATURE ENGINEERING IN PROGRESS                                                       │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Processing technical indicators...
+
+✅ Total features created: 75
+
+
+🚀 Creating Advanced Feature Interactions (Optimized)...
+   📊 Adding high-impact technical ratios...
+   🧠 Creating selective LSTM×Technical interactions...
+   🔬 Adding essential combinations...
+   ✅ Total features after optimized engineering: 90
+
+🔍 Analyzing feature correlations (threshold=0.98)...
+   ⚠️ Dropping 'lstm_price_5d' (corr=0.993 with 'lstm_price_10d')
+   ⚠️ Dropping 'lstm_price_10d' (corr=0.993 with 'lstm_price_20d')
+   ⚠️ Dropping 'rsi_14' (corr=1.000 with 'rsi')
+   ⚠️ Dropping 'lstm_price_20d' (corr=0.990 with 'bb_lower')
+   ⚠️ Dropping 'bb_lower' (corr=0.997 with 'bb_mid')
+   ⚠️ Dropping 'bb_mid' (corr=0.997 with 'bb_upper')
+   ⚠️ Dropping 'bb_upper' (corr=0.995 with 'KCLe_20_2')
+   ⚠️ Dropping 'KCLe_20_2' (corr=0.999 with 'KCBe_20_2')
+   ⚠️ Dropping 'KCBe_20_2' (corr=0.999 with 'KCUe_20_2')
+   ⚠️ Dropping 'sma_100' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'high_52w' (corr=0.982 with 'ma_200')
+   ⚠️ Dropping 'KCUe_20_2' (corr=0.993 with 'HLC3')
+   ⚠️ Dropping 'roc_10' (corr=1.000 with 'price_momentum_10d')
+   ✅ Removed 13 redundant features (protected 20 important ones)
+
+🔍 Applying adaptive feature filtering...
+   ⚠️ Removing 9 known low-importance features:
+      lstm_latent_2, rsi, rolling_volatility_zscore, regime_state, regime_change, vix_change, volume_roc_10, volume_ratio, regime_change
+   ✅ Features dropped successfully
+
+📊 Defining target with Triple Barrier Method (No Leakage)...
+   Triple Barrier Config: Volatility=rolling_std_20d | TP=1.8x | SL=1.2x | Horizon=20d
+   Label Distribution:
+      BUY  (Hit TP): 599 (40.3%)
+      SELL (Hit SL): 765 (51.5%)
+      HOLD (Timeout): 122 (8.2%)
+      (HOLD samples will be dropped from training)
+Preprocessing data (handling NaNs)...
+   Rows before preprocessing: 1506
+   Rows dropped (NaN in features/target + HOLD labels): 316
+   Data shape after preprocessing: (1190, 76)
+   Final class distribution: SELL=685 (57.6%), BUY=505 (42.4%)
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only
+✅ VisualizationEngine loaded successfully
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 7 sliding window splits
+
+--- Fold 1/7 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-08-16 (400 samples)
+Valid: 2022-08-17 to 2023-02-09 (120 samples)
+Class distribution in validation: {0.0: 76, 1.0: 44}
+   ✅ Positions opened: 0/120 (0.0%)
+   📏 Position sizing: sized=0/0 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.000
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000000
+      Std dev: 0.000000
+      Min/Max: 0.000000 / 0.000000
+      Long positions: 0
+  → Threshold (sharpe): BUY=0.6546 | Sharpe: 0.11 | WinRate: 46.8%
+  → AUC: 0.5813 | AUCPR: 0.4053 | Accuracy: 0.5583 (0.6333 w/ threshold)
+  → Sharpe: -0.4627 (nan w/ threshold) | Max DD: nan
+   Generating visualizations for Fold 1...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_9_fold1_2026-02-27_172434.png
+
+   🔮 Future Prediction Made: 34.4% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_9_fold1_2026-02-27_172434.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_9_fold1_2026-02-27_172434.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 34.4%
+
+   ❌ RECOMMENDATION: 🔴 AVOID/SELL (High risk)
+      Reason: High loss probability (65.6%)
+      Potential loss if stop hit: $15.37
+   ============================================================
+
+
+--- Fold 2/7 (TimeSeriesSplit) ---
+Train: 2021-06-07 to 2023-02-09 (400 samples)
+Valid: 2023-02-10 to 2023-08-22 (120 samples)
+Class distribution in validation: {1.0: 71, 0.0: 49}
+   ✅ Positions opened: 10/120 (8.3%)
+   📏 Position sizing: sized=10/10 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.990
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-02-10 to 2023-08-22
+      Winning trades: 5/10 (50.0% win rate)
+      Losing trades: 5
+      Avoided losses: 44 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000581
+      Std dev: 0.004809
+      Min/Max: -0.012635 / 0.040123
+      Long positions: 10
+  → Threshold (sharpe): BUY=0.6710 | Sharpe: 5.48 | WinRate: 58.5%
+  → AUC: 0.4379 | AUCPR: 0.5674 | Accuracy: 0.3833 (0.4083 w/ threshold)
+  → Sharpe: 1.7374 (1.6550 w/ threshold) | Max DD: -0.0127
+   Generating visualizations for Fold 2...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_9_fold2_2026-02-27_172434.png
+
+   🔮 Future Prediction Made: 44.7% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_9_fold2_2026-02-27_172434.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_9_fold2_2026-02-27_172434.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 44.7%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (44.7%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 3/7 (TimeSeriesSplit) ---
+Train: 2021-12-16 to 2023-08-22 (400 samples)
+Valid: 2023-08-23 to 2024-03-19 (120 samples)
+Class distribution in validation: {1.0: 69, 0.0: 51}
+   ✅ Positions opened: 35/120 (29.2%)
+   📏 Position sizing: sized=35/35 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-08-23 to 2024-03-19
+      Winning trades: 19/35 (54.3% win rate)
+      Losing trades: 16
+      Avoided losses: 35 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000732
+      Std dev: 0.006850
+      Min/Max: -0.029572 / 0.026599
+      Long positions: 35
+  → Threshold (sharpe): BUY=0.6726 | Sharpe: 3.58 | WinRate: 55.2%
+  → AUC: 0.4025 | AUCPR: 0.5262 | Accuracy: 0.4000 (0.4500 w/ threshold)
+  → Sharpe: 1.7542 (1.5128 w/ threshold) | Max DD: -0.0323
+   Generating visualizations for Fold 3...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_9_fold3_2026-02-27_172434.png
+
+   🔮 Future Prediction Made: 57.0% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_9_fold3_2026-02-27_172434.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_9_fold3_2026-02-27_172434.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 57.0%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (57.0%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 4/7 (TimeSeriesSplit) ---
+Train: 2022-06-13 to 2024-03-19 (400 samples)
+Valid: 2024-03-20 to 2024-09-20 (120 samples)
+Class distribution in validation: {0.0: 85, 1.0: 35}
+   ✅ Positions opened: 36/120 (30.0%)
+   📏 Position sizing: sized=36/36 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.888
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-03-20 to 2024-09-20
+      Winning trades: 16/36 (44.4% win rate)
+      Losing trades: 20
+      Avoided losses: 65 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000400
+      Std dev: 0.004924
+      Min/Max: -0.021758 / 0.018566
+      Long positions: 36
+  → Threshold (sharpe): BUY=0.6878 | Sharpe: 1.45 | WinRate: 55.7%
+  → AUC: 0.6558 | AUCPR: 0.3797 | Accuracy: 0.5250 (0.6750 w/ threshold)
+  → Sharpe: -0.0153 (1.0335 w/ threshold) | Max DD: -0.0380
+   Generating visualizations for Fold 4...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_9_fold4_2026-02-27_172434.png
+
+   🔮 Future Prediction Made: 74.8% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_9_fold4_2026-02-27_172434.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_9_fold4_2026-02-27_172434.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 74.8%
+
+   ✅ RECOMMENDATION: 🟢 BUY (High confidence)
+      Reason: Strong win probability (74.8%)
+      Expected profit if target hit: $30.74
+   ============================================================
+
+
+--- Fold 5/7 (TimeSeriesSplit) ---
+Train: 2022-12-13 to 2024-09-20 (400 samples)
+Valid: 2024-09-23 to 2025-03-18 (120 samples)
+Class distribution in validation: {0.0: 76, 1.0: 44}
+   ✅ Positions opened: 25/120 (20.8%)
+   📏 Position sizing: sized=25/25 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.878
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-09-23 to 2025-03-18
+      Winning trades: 14/25 (56.0% win rate)
+      Losing trades: 11
+      Avoided losses: 65 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000434
+      Std dev: 0.005302
+      Min/Max: -0.024460 / 0.036276
+      Long positions: 25
+  → Threshold (sharpe): BUY=0.6456 | Sharpe: 0.72 | WinRate: 59.4%
+  → AUC: 0.7706 | AUCPR: 0.5849 | Accuracy: 0.7000 (0.6583 w/ threshold)
+  → Sharpe: 0.3970 (1.0609 w/ threshold) | Max DD: -0.0271
+   Generating visualizations for Fold 5...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_9_fold5_2026-02-27_172434.png
+
+   🔮 Future Prediction Made: 60.9% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_9_fold5_2026-02-27_172434.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_9_fold5_2026-02-27_172434.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 60.9%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (60.9%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 6/7 (TimeSeriesSplit) ---
+Train: 2023-06-20 to 2025-03-18 (400 samples)
+Valid: 2025-03-19 to 2025-10-02 (120 samples)
+Class distribution in validation: {1.0: 71, 0.0: 49}
+   ✅ Positions opened: 14/120 (11.7%)
+   📏 Position sizing: sized=14/14 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.950
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-03-19 to 2025-10-02
+      Winning trades: 13/14 (92.9% win rate)
+      Losing trades: 1
+      Avoided losses: 48 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000320
+      Std dev: 0.002427
+      Min/Max: -0.007754 / 0.016852
+      Long positions: 14
+  → Threshold (sharpe): BUY=0.5973 | Sharpe: 0.77 | WinRate: 57.7%
+  → AUC: 0.4465 | AUCPR: 0.5835 | Accuracy: 0.4500 (0.5083 w/ threshold)
+  → Sharpe: 0.4551 (1.5746 w/ threshold) | Max DD: -0.0078
+   Generating visualizations for Fold 6...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_9_fold6_2026-02-27_172434.png
+
+   🔮 Future Prediction Made: 58.9% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_9_fold6_2026-02-27_172434.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_9_fold6_2026-02-27_172434.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 58.9%
+
+   ⚠️ RECOMMENDATION: 🟡 HOLD/WAIT (Uncertain)
+      Reason: Signal not clear enough (58.9%)
+      Wait for probability > 65% (buy) or < 35% (sell)
+   ============================================================
+
+
+--- Fold 7/7 (TimeSeriesSplit) ---
+Train: 2024-01-05 to 2025-10-02 (400 samples)
+Valid: 2025-10-03 to 2026-01-28 (70 samples)
+Class distribution in validation: {0.0: 51, 1.0: 19}
+   ✅ Positions opened: 18/70 (25.7%)
+   📏 Position sizing: sized=18/18 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-10-03 to 2026-01-28
+      Winning trades: 11/18 (61.1% win rate)
+      Losing trades: 7
+      Avoided losses: 44 (correctly predicted losers)
+   📊 Returns stats (valid days: 70/70):
+      Mean return: 0.000252
+      Std dev: 0.004504
+      Min/Max: -0.023987 / 0.021688
+      Long positions: 18
+  → Threshold (sharpe): BUY=0.5969 | Sharpe: 0.50 | WinRate: 51.3%
+  → AUC: 0.7585 | AUCPR: 0.4895 | Accuracy: 0.6143 (0.7857 w/ threshold)
+  → Sharpe: -0.9037 (0.6089 w/ threshold) | Max DD: -0.0348
+   Generating visualizations for Fold 7...
+   ✅ Visualization saved: out/lstm_xgboost_hybrid_run_9_fold7_2026-02-27_172434.png
+
+   🔮 Future Prediction Made: 67.6% probability of winning
+      Based on latest market conditions as of 2026-01-28
+   ⚙️ Dynamic risk config: {"dynamic_risk": {"type": "Volatility_Adjusted", "params": {"k_tp": 2.5, "k_sl": 1.25, "vol_metric": "rolling_std_20d"}}}
+   ✅ Forecast saved: out/future_forecast_run_9_fold7_2026-02-27_172434.png
+   ✅ Forecast zoom saved: out/future_forecast_zoom_run_9_fold7_2026-02-27_172434.png
+
+   ============================================================
+   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS
+   ============================================================
+   📅 Valid from: 2026-01-28
+   💰 Entry Price: $480.53
+   🎚️ Dynamic Risk: Volatility_Adjusted | metric=rolling_std_20d | k_tp=2.5 | k_sl=1.25
+   🎯 Profit Target: $511.27 (+6.40%)
+   🛑 Stop Loss: $465.17 (-3.20%)
+   📊 Win Probability: 67.6%
+
+   ✅ RECOMMENDATION: 🟢 BUY (High confidence)
+      Reason: Strong win probability (67.6%)
+      Expected profit if target hit: $30.74
+   ============================================================
+
+
+Configured folds: 7 | Executed valid folds: 7 | Skipped: 0
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  calibration_enabled calibration_method
+    1 0.581340 0.405270  0.558333              0.633333 -0.462657           NaN                 NaN   0.000000 0.000000 0.000000       0.654603             NaN           sharpe                 True           0.000000       0.000000            0                     62                  0.516667                False               none
+    2 0.437913 0.567430  0.383333              0.408333  1.737400     -0.012737            1.655012   0.500000 0.070423 0.123457       0.671036             NaN           sharpe                 True           0.069693       0.600000           10                     41                  0.341667                False               none
+    3 0.402529 0.526239  0.400000              0.450000  1.754235     -0.032274            1.512820   0.542857 0.275362 0.365384       0.672583             NaN           sharpe                 True           0.087861       0.571429           35                     58                  0.483333                False               none
+    4 0.655798 0.379714  0.525000              0.675000 -0.015282     -0.037999            1.033523   0.444444 0.457143 0.450704       0.687802             NaN           sharpe                 True           0.047996       0.527778           36                     70                  0.583333                False               none
+    5 0.770634 0.584870  0.700000              0.658333  0.396981     -0.027148            1.060858   0.560000 0.318182 0.405797       0.645638             NaN           sharpe                 True           0.052042       0.600000           25                     64                  0.533333                False               none
+    6 0.446536 0.583488  0.450000              0.508333  0.455093     -0.007754            1.574570   0.928571 0.183099 0.305882       0.597316             NaN           sharpe                 True           0.038417       0.642857           14                     71                  0.591667                False               none
+    7 0.758514 0.489462  0.614286              0.785714 -0.903688     -0.034808            0.608944   0.611111 0.578947 0.594594       0.596869             NaN           sharpe                 True           0.017649       0.555556           18                     39                  0.557143                False               none
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5790 ± 0.1546
+AUCPR:                0.5052 ± 0.0844
+Accuracy:             0.5187 ± 0.1160
+Accuracy (threshold): 0.5884 ± 0.1362
+Sharpe Ratio:         0.4232 ± 1.0197
+Sharpe (threshold):   1.2410 ± 0.4078
+Max Drawdown:         -0.0255 ± 0.0124
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 9 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:   9                                    ║
+║ Best AUC: 0.5790                              ║
+║ Best Accuracy: 0.5542                      ║
+║ Best Sharpe Ratio: 1.1531                  ║
+║                                                            ║
+║ Average AUC: 0.5535                         ║
+║ Average Accuracy: 0.5277                 ║
+║ Average Sharpe Ratio: 0.7207             ║
+║                                                            ║
+║ AUC Variance: 0.000556                      ║
+║ Accuracy Variance: 0.000226             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+          feature  importance
+           ADX_14    0.090199
+            macds    0.085682
+     lstm_dir_20d    0.071014
+    volatility_20    0.061378
+         ema_long    0.056666
+     lstm_dir_10d    0.054985
+    lstm_latent_6    0.049438
+        ema_short    0.049055
+             macd    0.036728
+      lstm_dir_5d    0.036167
+    lstm_latent_1    0.036032
+    lstm_latent_9    0.034113
+    lstm_latent_3    0.032820
+    lstm_latent_7    0.029772
+distance_to_ma200    0.029100
+Result: status=ok score=0.007344776352487509
+================================================================================
+Leaderboard (top 10):
+   score   auc_pr      auc auc_std auc_pr_std  accuracy sharpe_thresholded_mean min_fold_trades median_fold_trades worst_fold_auc worst_fold_aucpr std_fold_sharpe_thresholded  n_folds_valid  n_folds_skipped calibration_enabled calibration_method  LABEL_TP_MULTIPLIER  LABEL_SL_MULTIPLIER  LABEL_HORIZON_DAYS  USE_SYNTHETIC_SAMPLING
+0.016663 0.525917 0.569031    None       None  0.530556                    None            None               None           None             None                        None              6                0                None               None                  1.8                  1.2                  15                   False
+0.013671 0.519268 0.578239    None       None  0.548611                    None            None               None           None             None                        None              6                0                None               None                  1.8                  1.2                  15                    True
+0.007345 0.505211 0.579038    None       None  0.518707                    None            None               None           None             None                        None              7                0                None               None                  1.8                  1.2                  20                   False
+0.005232 0.500517 0.574515    None       None  0.525340                    None            None               None           None             None                        None              7                0                None               None                  1.8                  1.2                  20                    True
+Saved CSV: out/leaderboard_MSFT_20260227_172628.csv
+Saved JSON: out/leaderboard_MSFT_20260227_172628.json

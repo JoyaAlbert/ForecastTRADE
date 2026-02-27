@@ -1,0 +1,30 @@
+SEED: 42
+OBJECTIVE: sharpe_net
+RISK_PROFILE: conservative
+CV_SCHEME: sliding
+COST_BPS: 20.0
+SLIPPAGE_BPS: 5.0
+MIN_COVERAGE_RATIO: 0.5
+ENABLE_STABILITY_TUNING: true
+TUNE_ON_FIRST_VALID_FOLD_ONLY: true
+ENABLE_PROBA_CALIBRATION: true
+CALIBRATION_METHOD: isotonic
+CALIBRATION_MIN_SAMPLES: 300
+USE_SYNTHETIC_SAMPLING: false
+XGB_PARAMS:
+  objective: binary:logistic
+  eval_metric: aucpr
+  max_depth: 6
+  learning_rate: 0.02
+  n_estimators: 600
+  subsample: 0.85
+  colsample_bytree: 0.85
+  min_child_weight: 2
+  gamma: 0.2
+  reg_alpha: 0.2
+  reg_lambda: 1.0
+  max_delta_step: 1
+  scale_pos_weight: null
+  random_state: 42
+  use_label_encoder: false
+  early_stopping_rounds: 30

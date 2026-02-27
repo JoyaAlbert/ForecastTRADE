@@ -11,3 +11,4 @@ statsmodels
 scipy
 rich
 tabulate
+PyYAML

@@ -16,7 +16,12 @@ model training with time-series cross-validation.
 
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logs
+os.environ['ABSL_LOG_SEVERITY_LEVEL'] = '3'
+os.environ['GLOG_minloglevel'] = '3'
 
+import argparse
+import random
+import time
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -25,18 +30,109 @@ import xgboost as xgb
 from sklearn.metrics import roc_auc_score, accuracy_score, average_precision_score, precision_recall_curve
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import RobustScaler
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
+try:
+    from sklearn.frozen import FrozenEstimator
+except Exception:  # pragma: no cover
+    FrozenEstimator = None
 from imblearn.over_sampling import SMOTE, ADASYN
 import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional
 try:
-    from .lstm_predictor import generate_lstm_regime_features
+    from .data_pipeline import load_market_data
+    from .feature_pipeline import run_feature_pipeline
+    from .labeling_pipeline import run_labeling_pipeline
+    from .training_pipeline import run_training_pipeline
+    from .reporting_pipeline import (
+        build_dynamic_risk_config,
+        latest_volatility_for_risk,
+        summarize_future_predictions,
+    )
+    from .lstm_predictor import (
+        generate_lstm_regime_features,
+        generate_placeholder_lstm_features,
+        generate_lstm_regime_features_train_only,
+    )
     from .run_logger import AccumulativeRunLogger
     from .rich_ui import RichUI
+    from .utils.runtime import (
+        CacheManager,
+        DataConfig,
+        FeatureConfig,
+        LabelingConfig,
+        RiskConfig,
+        RunConfig,
+        RuntimeFlags,
+        StageProfiler,
+        TrainingConfig,
+    )
+    from .configuration import apply_config_overrides, load_external_config
+    from .modeling.cv import PurgedEmbargoTimeSeriesSplit, sliding_window_splits as sliding_window_splits_v2
+    from .modeling.thresholds import (
+        find_optimal_buy_threshold_sharpe as find_optimal_buy_threshold_sharpe_v2,
+        find_optimal_threshold as find_optimal_threshold_v2,
+    )
+    from .modeling.calibration import (
+        calibration_metrics,
+        fit_probability_calibrator as fit_probability_calibrator_v2,
+        train_calibration_split,
+    )
+    from .backtest.metrics import (
+        apply_trading_costs,
+        calculate_max_drawdown as calculate_max_drawdown_v2,
+        calculate_sharpe_ratio as calculate_sharpe_ratio_v2,
+        evaluate_net_metrics,
+    )
+    from .recommendation.engine import conservative_recommendation
 except ImportError:
-    from lstm_predictor import generate_lstm_regime_features
+    from data_pipeline import load_market_data
+    from feature_pipeline import run_feature_pipeline
+    from labeling_pipeline import run_labeling_pipeline
+    from training_pipeline import run_training_pipeline
+    from reporting_pipeline import (
+        build_dynamic_risk_config,
+        latest_volatility_for_risk,
+        summarize_future_predictions,
+    )
+    from lstm_predictor import (
+        generate_lstm_regime_features,
+        generate_placeholder_lstm_features,
+        generate_lstm_regime_features_train_only,
+    )
     from run_logger import AccumulativeRunLogger
     from rich_ui import RichUI
+    from utils.runtime import (
+        CacheManager,
+        DataConfig,
+        FeatureConfig,
+        LabelingConfig,
+        RiskConfig,
+        RunConfig,
+        RuntimeFlags,
+        StageProfiler,
+        TrainingConfig,
+    )
+    from configuration import apply_config_overrides, load_external_config
+    from modeling.cv import PurgedEmbargoTimeSeriesSplit, sliding_window_splits as sliding_window_splits_v2
+    from modeling.thresholds import (
+        find_optimal_buy_threshold_sharpe as find_optimal_buy_threshold_sharpe_v2,
+        find_optimal_threshold as find_optimal_threshold_v2,
+    )
+    from modeling.calibration import (
+        calibration_metrics,
+        fit_probability_calibrator as fit_probability_calibrator_v2,
+        train_calibration_split,
+    )
+    from backtest.metrics import (
+        apply_trading_costs,
+        calculate_max_drawdown as calculate_max_drawdown_v2,
+        calculate_sharpe_ratio as calculate_sharpe_ratio_v2,
+        evaluate_net_metrics,
+    )
+    from recommendation.engine import conservative_recommendation
 # from triple_barrier_labeler import TripleBarrierLabeler  # DEPRECATED: now using percentile-based labeling
 
 # VisualizationEngine will be imported dynamically when needed
@@ -47,9 +143,36 @@ ui = RichUI()
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
+
+def set_global_seed(seed: int) -> None:
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import tensorflow as tf
+
+        tf.random.set_seed(seed)
+    except Exception:
+        pass
+
 # --- 1. CONFIGURATION ---
 class Config:
     """Configuration class for the modeling pipeline."""
+    SEED = 42
+    OBJECTIVE = "sharpe_net"
+    RISK_PROFILE = "conservative"
+    CV_SCHEME = "sliding"
+    COST_BPS = 20.0
+    SLIPPAGE_BPS = 5.0
+    MIN_COVERAGE_RATIO = 0.5
+    CONSERVATIVE_MIN_BUY_THRESHOLD = 0.66
+    CONSERVATIVE_MAX_TRADE_RATIO = 0.22
+    CONSERVATIVE_PERCENTILE_THRESHOLD = 80
+    CONSERVATIVE_MIN_CONFIDENCE = 0.62
+    CONSERVATIVE_UNCERTAINTY_BAND = 0.12
+    CONSERVATIVE_VOL_PENALTY_MULT = 1.25
+
     # Data Parameters
     TICKER = "AAPL"
     VIX_TICKER = "^VIX"
@@ -72,6 +195,10 @@ class Config:
     DYNAMIC_RISK_K_SL = 1.25
     DYNAMIC_RISK_VOL_METRIC = "rolling_std_20d"  # Options: rolling_std_20d, atr_14d
     ESTIMATED_TRANSACTION_COST = 0.0020  # 0.20% per trade (estimated)
+    # Triple barrier labeling parameters (separate from trading execution risk)
+    LABEL_TP_MULTIPLIER = 2.0
+    LABEL_SL_MULTIPLIER = 1.5
+    LABEL_HORIZON_DAYS = 20
 
     # Model Parameters (optimized for PERCENTILE LABELING + balanced classes)
     XGB_PARAMS = {
@@ -105,6 +232,7 @@ class Config:
     SLIDING_WINDOW_SIZE = 400  # 400 days window (~1.5 years)
     VALIDATION_WINDOW_SIZE = 120  # Increased to 120 days (~6 months) for statistically significant validation
     MIN_VALIDATION_SIZE = 60  # Minimum validation samples to keep a fold
+    MIN_TRADES_PER_FOLD = 3  # Skip unreliable folds with too few trades
     # Benefit: Model returns are more realistic and less prone to "lucky" small sample sizes
     # Note: Requires more data but yields robust metrics
     
@@ -116,6 +244,7 @@ class Config:
     THRESHOLD_OPTIM_METRIC = "f1"  # Options: "f1", "precision_at_recall"
     THRESHOLD_MIN_RECALL = 0.25  # Used for precision_at_recall
     THRESHOLD_MIN_PRECISION = 0.25  # Used for recall_at_precision (future)
+    THRESHOLD_MIN_TRADES_RATIO = 0.08  # Minimum long-trade ratio when optimizing threshold
     
     # NEW: Sharpe-Optimized Threshold System
     OPTIMIZE_BY_SHARPE = True  # Optimize thresholds by Sharpe Ratio (better than F1)
@@ -129,6 +258,13 @@ class Config:
     TUNE_ON_FIRST_VALID_FOLD_ONLY = True  # Tune once, reuse for remaining folds (faster + stabler)
     STABILITY_TUNING_MAX_CANDIDATES = 8
     STABILITY_TUNING_MIN_TRADES = 8
+    USE_SYNTHETIC_SAMPLING = True  # ADASYN/SMOTE for class balancing
+    ENABLE_PROBA_CALIBRATION = True
+    CALIBRATION_METHOD: Literal["isotonic", "sigmoid"] = "isotonic"
+    CALIBRATION_MIN_SAMPLES = 300
+    LSTM_LEAKAGE_SAFE_MODE = True  # Refit LSTM per fold on train only
+    ENABLE_REGIME_SPLIT_MODEL = False  # Experimental two-model regime router
+    REGIME_VOL_Z_THRESHOLD = 1.0
     
     # Position Opening Strategy
     POSITION_OPENING_MODE = "hybrid"  # Options: "threshold" (simple), "percentile" (top X%), "hybrid" (smart)
@@ -172,6 +308,8 @@ class Config:
         'volume_ratio', 'mfi',
         # Market
         'close_vix_ratio', 'vix_change',
+        # LSTM direction confidence features
+        'lstm_dir_5d', 'lstm_dir_10d', 'lstm_dir_20d', 'lstm_return_confidence',
     ]
     MIN_FEATURES = 15  # Minimum features required after contract resolution
 
@@ -631,17 +769,18 @@ def define_target(df):
     
     # 2. CALCULATE BARRIERS FOR EACH TIMESTAMP
     # Note: These are "theoretical" barriers if we entered at this timestamp
-    df['barrier_up'] = df['close'] + (vol_series * 2.0)  # slightly tighter for labeling than trading (2.0 vs 2.5)
-    df['barrier_down'] = df['close'] - (vol_series * 1.5) # slightly tighter for labeling (1.5 vs 1.25)
+    df['barrier_up'] = df['close'] + (vol_series * Config.LABEL_TP_MULTIPLIER)
+    df['barrier_down'] = df['close'] - (vol_series * Config.LABEL_SL_MULTIPLIER)
     
-    # K_TP=2.0, K_SL=1.5 gives a good Risk:Reward ratio for labeling
-    # We want to find clear trends, not just noise
-    
-    print(f"   Triple Barrier Config: Volatility={vol_metric_used} | TP=2.0x | SL=1.5x | Horizon=20d")
+    print(
+        f"   Triple Barrier Config: Volatility={vol_metric_used} | "
+        f"TP={Config.LABEL_TP_MULTIPLIER:.1f}x | SL={Config.LABEL_SL_MULTIPLIER:.1f}x "
+        f"| Horizon={Config.LABEL_HORIZON_DAYS}d"
+    )
 
     # 3. VECTORIZED BARRIER TOUCH DETECTION
     # We need to look forward 20 days to see what was hit first
-    horizon = 20
+    horizon = int(Config.LABEL_HORIZON_DAYS)
     
     # Use numpy for speed
     closes = df['close'].values
@@ -766,46 +905,10 @@ def preprocess_data_raw(df, feature_contract: Optional[Dict[str, Any]] = None):
 
 # --- 6. MODEL TRAINING & EVALUATION (TIME-SERIES AWARE) ---
 def calculate_sharpe_ratio(returns, risk_free_rate=0.02):
-    """
-    Calculate annualized Sharpe Ratio.
-    
-    Args:
-        returns (np.array): Daily returns (can include zeros for days without positions)
-        risk_free_rate (float): Annual risk-free rate
-        
-    Returns:
-        float: Sharpe Ratio
-    """
-    if len(returns) < 2:
-        return np.nan
-    # Use ALL returns (including zeros for cash days) for realistic Sharpe calculation
-    # This reflects actual portfolio performance: long on selected days, cash otherwise
-    excess_returns = returns - (risk_free_rate / 252)
-    mean_return = excess_returns.mean()
-    std_dev = excess_returns.std()
-    
-    # Need variance > 0 to calculate meaningful Sharpe
-    if std_dev < 1e-10:
-        return np.nan
-    
-    # Annualized Sharpe Ratio (252 trading days per year)
-    sharpe = (mean_return / std_dev) * np.sqrt(252)
-    return sharpe if not np.isnan(sharpe) else np.nan
+    return calculate_sharpe_ratio_v2(returns, risk_free_rate=risk_free_rate)
 
 def calculate_max_drawdown(returns):
-    """
-    Calculate maximum drawdown.
-    
-    Args:
-        returns (np.array): Daily returns (strategy returns, can contain zeros for no-position days)
-        
-    Returns:
-        float: Maximum drawdown (as negative value)
-    """
-    cumulative = np.cumprod(1 + returns)
-    running_max = np.maximum.accumulate(cumulative)
-    drawdown = (cumulative - running_max) / running_max
-    return drawdown.min()
+    return calculate_max_drawdown_v2(returns)
 
 def apply_probability_threshold(
     proba_preds,
@@ -893,97 +996,30 @@ def apply_probability_threshold(
     return filtered
 
 def find_optimal_threshold(y_true, proba_preds, metric="f1", min_recall=0.25, min_precision=0.25):
-    """
-    Find an optimal probability threshold from the precision-recall curve.
-
-    Args:
-        y_true (np.array): True labels.
-        proba_preds (np.array): Predicted probabilities for class 1.
-        metric (str): Optimization target: "f1" or "precision_at_recall".
-        min_recall (float): Minimum recall when using precision_at_recall.
-        min_precision (float): Minimum precision for future extensions.
-
-    Returns:
-        tuple: (threshold, stats dict)
-    """
-    precision, recall, thresholds = precision_recall_curve(y_true, proba_preds)
-    if len(thresholds) == 0:
-        return 0.5, {"precision": precision[-1], "recall": recall[-1], "f1": 0.0}
-
-    precision = precision[1:]
-    recall = recall[1:]
-
-    f1_scores = 2 * (precision * recall) / (precision + recall + 1e-9)
-
-    if metric == "precision_at_recall":
-        mask = recall >= min_recall
-        if np.any(mask):
-            best_idx = np.argmax(precision[mask])
-            idx = np.where(mask)[0][best_idx]
-        else:
-            idx = int(np.nanargmax(f1_scores))
-    else:
-        idx = int(np.nanargmax(f1_scores))
-
-    return thresholds[idx], {
-        "precision": float(precision[idx]),
-        "recall": float(recall[idx]),
-        "f1": float(f1_scores[idx])
-    }
+    _ = min_precision
+    return find_optimal_threshold_v2(y_true, proba_preds, metric=metric, min_recall=min_recall)
 
 
-def find_optimal_buy_threshold_sharpe(y_true, proba_preds, returns, min_samples=10):
-    """
-    Find optimal probability threshold that MAXIMIZES SHARPE RATIO.
-    
-    This is superior to F1 optimization because it directly optimizes
-    for risk-adjusted returns, which is what trading performance measures.
-    
-    Args:
-        y_true (np.array): True labels (1=win, 0=loss)
-        proba_preds (np.array): Predicted probabilities for class 1
-        returns (np.array): Actual forward returns for each sample
-        min_samples (int): Minimum trades required to calculate Sharpe
-    
-    Returns:
-        tuple: (threshold_buy, stats dict)
-    """
-    # Grid search over threshold space
-    threshold_buy_range = np.arange(0.45, 0.80, 0.05)  # More granular: 45% to 75%
-    
-    best_sharpe = -np.inf
-    best_threshold_buy = 0.65
-    best_stats = {}
-    
-    for th_buy in threshold_buy_range:
-        preds = np.zeros(len(proba_preds))
-        preds[proba_preds >= th_buy] = 1
-        trade_mask = preds == 1
-        if trade_mask.sum() < min_samples:
-            continue
-
-        trade_returns = returns[trade_mask]
-        if len(trade_returns) > 0 and trade_returns.std() > 0:
-            sharpe = trade_returns.mean() / trade_returns.std() * np.sqrt(252)
-        else:
-            sharpe = 0
-
-        if sharpe > best_sharpe:
-            best_sharpe = sharpe
-            best_threshold_buy = th_buy
-
-            win_rate = (trade_returns > 0).sum() / len(trade_returns) if len(trade_returns) > 0 else 0
-            avg_return = trade_returns.mean() if len(trade_returns) > 0 else 0
-
-            best_stats = {
-                'sharpe': float(sharpe),
-                'n_trades': int(trade_mask.sum()),
-                'win_rate': float(win_rate),
-                'avg_return': float(avg_return),
-                'threshold_buy': float(th_buy),
-            }
-
-    return best_threshold_buy, best_stats
+def find_optimal_buy_threshold_sharpe(
+    y_true,
+    proba_preds,
+    returns,
+    min_samples=10,
+    min_trades_ratio=0.08,
+    cost_rate=0.0,
+    slippage_rate=0.0,
+    max_trades_ratio=None,
+):
+    _ = y_true
+    return find_optimal_buy_threshold_sharpe_v2(
+        proba_preds=np.asarray(proba_preds),
+        raw_returns=np.asarray(returns),
+        min_samples=min_samples,
+        min_trades_ratio=min_trades_ratio,
+        cost_rate=cost_rate,
+        slippage_rate=slippage_rate,
+        max_trades_ratio=max_trades_ratio,
+    )
 
 
 def find_optimal_thresholds_long_short(y_true, proba_preds, returns, min_samples=10):
@@ -1026,7 +1062,15 @@ def smooth_thresholds(current_buy, current_sell, prev_buy, prev_sell, alpha=0.35
     return float(smoothed_buy), float(smoothed_sell)
 
 
-def compute_position_sizes(proba_preds, threshold_buy, volatility_zscore=0.0, eligible_mask=None):
+def compute_position_sizes(
+    proba_preds,
+    threshold_buy,
+    volatility_zscore=0.0,
+    eligible_mask=None,
+    min_confidence=None,
+    uncertainty_band=None,
+    vol_penalty=None,
+):
     """
     Confidence- and regime-aware position sizing.
 
@@ -1060,13 +1104,17 @@ def compute_position_sizes(proba_preds, threshold_buy, volatility_zscore=0.0, el
         1
     )
 
+    min_confidence = Config.POSITION_SIZE_MIN_CONFIDENCE if min_confidence is None else float(min_confidence)
+    uncertainty_band = Config.POSITION_SIZE_UNCERTAINTY_BAND if uncertainty_band is None else float(uncertainty_band)
+    vol_penalty_cfg = Config.POSITION_SIZE_VOL_RISK_PENALTY if vol_penalty is None else float(vol_penalty)
+
     center_distance = np.abs(p_buy - 0.5)
-    uncertain = center_distance < Config.POSITION_SIZE_UNCERTAINTY_BAND
-    low_conf = p_buy < Config.POSITION_SIZE_MIN_CONFIDENCE
+    uncertain = center_distance < uncertainty_band
+    low_conf = p_buy < min_confidence
 
     # Volatility risk multiplier (smaller size in high-volatility regimes)
     vol_penalty = max(0.0, volatility_zscore)
-    vol_multiplier = float(np.clip(1.0 - Config.POSITION_SIZE_VOL_RISK_PENALTY * (vol_penalty / 2.0), 0.35, 1.0))
+    vol_multiplier = float(np.clip(1.0 - vol_penalty_cfg * (vol_penalty / 2.0), 0.25, 1.0))
 
     base_size = confidence_component * vol_multiplier
     base_size[uncertain | low_conf] = 0.0
@@ -1163,6 +1211,27 @@ def apply_regime_hard_gate(preds_thresholded, X_val_unscaled, avg_vol_zscore):
     return gated, gate_active, gate_reason
 
 
+def _fit_probability_calibrator(model, X_calib, y_calib, method="isotonic"):
+    raw_proba = model.predict_proba(X_calib)[:, 1]
+    return fit_probability_calibrator_v2(raw_proba, y_calib, method=method)
+
+
+def _compute_regime_mask(X_train_unscaled, X_target_unscaled):
+    """Compute high-volatility regime mask relative to training distribution."""
+    if 'rolling_volatility_zscore' in X_target_unscaled.columns and 'rolling_volatility_zscore' in X_train_unscaled.columns:
+        train_z = np.asarray(X_train_unscaled['rolling_volatility_zscore'].values, dtype=float)
+        target_z = np.asarray(X_target_unscaled['rolling_volatility_zscore'].values, dtype=float)
+        if np.isfinite(train_z).any() and np.isfinite(target_z).any():
+            return target_z > Config.REGIME_VOL_Z_THRESHOLD
+
+    train_vol = np.asarray(X_train_unscaled['volatility_20'].values, dtype=float)
+    target_vol = np.asarray(X_target_unscaled['volatility_20'].values, dtype=float)
+    mu = np.nanmean(train_vol)
+    sigma = np.nanstd(train_vol) + 1e-9
+    z = (target_vol - mu) / sigma
+    return z > Config.REGIME_VOL_Z_THRESHOLD
+
+
 def tune_xgb_params_for_stability(
     X_train,
     y_train,
@@ -1171,6 +1240,7 @@ def tune_xgb_params_for_stability(
     val_returns,
     base_params,
     scale_pos_weight,
+    max_candidates: Optional[int] = None,
 ):
     """
     Lightweight hyperparameter tuning focused on fold stability.
@@ -1188,7 +1258,8 @@ def tune_xgb_params_for_stability(
         {'max_depth': 6, 'learning_rate': 0.015, 'n_estimators': 900, 'subsample': 0.80, 'colsample_bytree': 0.80, 'min_child_weight': 3, 'gamma': 0.28, 'reg_alpha': 0.28, 'reg_lambda': 1.15},
         {'max_depth': 5, 'learning_rate': 0.03, 'n_estimators': 450, 'subsample': 0.90, 'colsample_bytree': 0.88, 'min_child_weight': 2, 'gamma': 0.18, 'reg_alpha': 0.15, 'reg_lambda': 0.95},
     ]
-    candidates = candidates[:Config.STABILITY_TUNING_MAX_CANDIDATES]
+    effective_max = Config.STABILITY_TUNING_MAX_CANDIDATES if max_candidates is None else int(max_candidates)
+    candidates = candidates[:effective_max]
 
     best_score = -np.inf
     best_params = None
@@ -1211,7 +1282,8 @@ def tune_xgb_params_for_stability(
                 y_val.values,
                 proba,
                 val_returns,
-                min_samples=Config.STABILITY_TUNING_MIN_TRADES
+                min_samples=Config.STABILITY_TUNING_MIN_TRADES,
+                min_trades_ratio=Config.THRESHOLD_MIN_TRADES_RATIO,
             )
             preds = apply_probability_threshold(
                 proba,
@@ -1304,7 +1376,7 @@ def create_volatility_weighted_classifier(base_model, volatility_weights=None):
     return volatility_adjusted_predict_proba
 
 
-def sliding_window_splits(n_samples, train_size, test_size, n_splits=8):
+def sliding_window_splits(n_samples, train_size, test_size, n_splits=8, min_test_size=1):
     """
     Generate sliding window split indices for walk-forward analysis.
     
@@ -1338,7 +1410,7 @@ def sliding_window_splits(n_samples, train_size, test_size, n_splits=8):
             train_indices = np.arange(train_start, min(train_end, n_samples))
             test_indices = np.arange(test_start, test_end)
             
-            if len(train_indices) >= train_size // 2 and len(test_indices) > 0:
+            if len(train_indices) >= train_size // 2 and len(test_indices) >= int(min_test_size):
                 yield train_indices, test_indices
 
 def summarize_cv_results(fold_results, skipped_folds):
@@ -1365,7 +1437,12 @@ def summarize_cv_results(fold_results, skipped_folds):
     }
 
 
-def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]] = None):
+def train_and_evaluate_timeseries(
+    df,
+    feature_contract: Optional[Dict[str, Any]] = None,
+    runtime_flags: Optional[RuntimeFlags] = None,
+    stage_profiler: Optional[StageProfiler] = None,
+):
     """
     Trains and evaluates the XGBoost model using TimeSeriesSplit
     with proper data leakage prevention:
@@ -1376,10 +1453,13 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
     Args:
         df (pd.DataFrame): The preprocessed DataFrame (NOT scaled yet).
     """
+    runtime_flags = runtime_flags or RuntimeFlags()
+    stage_profiler = stage_profiler or StageProfiler(enabled=False)
+
     print("\n--- Starting Time-Series-Aware Model Training ---")
     print(
         f"Configured folds: {Config.N_SPLITS} | Min validation size: {Config.MIN_VALIDATION_SIZE} "
-        f"| Trading mode: {Config.TRADING_MODE}"
+        f"| Trading mode: {Config.TRADING_MODE} | mode={runtime_flags.mode} | plots={runtime_flags.plots}"
     )
 
     features = get_feature_columns(df, feature_contract=feature_contract)
@@ -1390,21 +1470,22 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
     
     if X.empty or y.empty:
         print("❌ Error: No data available for training")
-        return
+        return {}
 
     # Initialize visualization and logging engines
     viz_engine = None
-    try:
+    if runtime_flags.plots != "none":
         try:
-            from viewing.visualization_engine import VisualizationEngine as VizEngine
-        except ImportError:
-            from visualization_engine import VisualizationEngine as VizEngine
-        viz_engine = VizEngine(output_dir='out')
-        print("✅ VisualizationEngine loaded successfully")
-    except ImportError as e:
-        print(f"⚠️ Warning: Could not import VisualizationEngine: {e}")
-    except Exception as e:
-        print(f"⚠️ Warning: VisualizationEngine initialization error: {e}")
+            try:
+                from viewing.visualization_engine import VisualizationEngine as VizEngine
+            except ImportError:
+                from visualization_engine import VisualizationEngine as VizEngine
+            viz_engine = VizEngine(output_dir='out')
+            print("✅ VisualizationEngine loaded successfully")
+        except ImportError as e:
+            print(f"⚠️ Warning: Could not import VisualizationEngine: {e}")
+        except Exception as e:
+            print(f"⚠️ Warning: VisualizationEngine initialization error: {e}")
     
     run_logger = AccumulativeRunLogger(log_file='out/runs_log.json')
     
@@ -1412,22 +1493,29 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
     run_number = run_logger.runs['metadata']['total_runs'] + 1
 
     # Choose cross-validation strategy
-    if Config.USE_SLIDING_WINDOW:
+    use_sliding = runtime_flags.cv_scheme == "sliding"
+    if use_sliding:
         print(f"✨ Using SLIDING WINDOW strategy (adaptive, not expanding)")
         print(f"   Train window: {Config.SLIDING_WINDOW_SIZE} days | Test window: {Config.VALIDATION_WINDOW_SIZE} days")
         print(f"   This allows model to adapt faster to market regime changes")
-        # Create sliding window splits
-        cv_splits = list(sliding_window_splits(
+        cv_splits = list(sliding_window_splits_v2(
             len(X),
             train_size=Config.SLIDING_WINDOW_SIZE,
             test_size=Config.VALIDATION_WINDOW_SIZE,
-            n_splits=Config.N_SPLITS
+            n_splits=Config.N_SPLITS,
+            min_test_size=Config.MIN_VALIDATION_SIZE,
         ))
         print(f"   Generated {len(cv_splits)} sliding window splits")
     else:
-        print(f"Using TimeSeriesSplit with {Config.N_SPLITS} splits and {Config.EMBARGO_DAYS}-day embargo period")
-        tscv = TimeSeriesSplit(n_splits=Config.N_SPLITS)
-        cv_splits = list(tscv.split(X))
+        print(f"Using PURGED+EMBARGO TimeSeries CV with {Config.N_SPLITS} splits")
+        purged = PurgedEmbargoTimeSeriesSplit(
+            n_splits=Config.N_SPLITS,
+            test_size=Config.VALIDATION_WINDOW_SIZE,
+            purge_size=Config.LABEL_HORIZON_DAYS,
+            embargo_size=Config.EMBARGO_DAYS,
+            min_train_size=Config.MIN_TRAIN_SIZE,
+        )
+        cv_splits = list(purged.split(len(X)))
     
     fold_results = []
     skipped_folds = []
@@ -1441,16 +1529,27 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
     total_wins_agg = 0
     total_trades_agg = 0
     tuned_params_cache = None
+    last_plot_payload = None
+    effective_tuning_candidates = Config.STABILITY_TUNING_MAX_CANDIDATES
+    if runtime_flags.mode == "fast":
+        effective_tuning_candidates = min(3, Config.STABILITY_TUNING_MAX_CANDIDATES)
+    calibration_allowed = Config.ENABLE_PROBA_CALIBRATION and runtime_flags.mode == "full"
+    cost_rate = runtime_flags.cost_bps / 10000.0
+    slippage_rate = runtime_flags.slippage_bps / 10000.0
+    conservative_mode = runtime_flags.risk_profile == "conservative"
+    leakage_safe_lstm = Config.LSTM_LEAKAGE_SAFE_MODE and runtime_flags.mode == "full"
+    lstm_feature_cols = [c for c in features if c.startswith("lstm_")]
     
     for fold_idx, (train_idx, val_idx) in enumerate(cv_splits, start=1):
+        fold_start = time.perf_counter()
         # Get train and test indices
         X_train_unscaled = X.iloc[train_idx].copy()
         X_val_unscaled = X.iloc[val_idx].copy()
         y_train = y.iloc[train_idx].copy()
         y_val = y.iloc[val_idx].copy()
         
-        # Check embargo period: ensure no overlap (only for expanding window strategy)
-        if not Config.USE_SLIDING_WINDOW:
+        # Check embargo period: ensure no overlap when scheme is not sliding
+        if not use_sliding:
             embargo_buffer = Config.EMBARGO_DAYS
             if len(train_idx) > embargo_buffer:
                 train_idx_embargoed = train_idx[:-embargo_buffer]
@@ -1487,6 +1586,24 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
             print(f"   └─ Market condition: All trades hit " + ("profit target" if val_class == 1 else "stop loss"))
             skipped_folds.append({'fold': fold_idx, 'reason': 'single_validation_class'})
             continue
+
+        if leakage_safe_lstm and lstm_feature_cols:
+            with stage_profiler.timed("lstm_fold"):
+                try:
+                    fold_idx_union = X_train_unscaled.index.union(X_val_unscaled.index).sort_values()
+                    fold_block = df.loc[fold_idx_union].copy()
+                    train_block = df.loc[X_train_unscaled.index].copy()
+                    fold_lstm_df = generate_lstm_regime_features_train_only(
+                        train_block,
+                        fold_block,
+                        ticker_name=Config.TICKER,
+                    )
+                    for col in lstm_feature_cols:
+                        if col in fold_lstm_df.columns:
+                            X_train_unscaled.loc[:, col] = fold_lstm_df.loc[X_train_unscaled.index, col].values
+                            X_val_unscaled.loc[:, col] = fold_lstm_df.loc[X_val_unscaled.index, col].values
+                except Exception as exc:
+                    print(f"⚠️ Fold {fold_idx}: LSTM leakage-safe generation failed ({exc}); using cached LSTM features.")
         
         # === CRITICAL: Scale ONLY on training data ===
         scaler = RobustScaler()
@@ -1522,28 +1639,22 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
         # print(f"   ✅ Original class distribution: {class_counts.to_dict()}")
         # print(f"   ✅ Class weights computed: scale_pos_weight = {scale_pos_weight:.4f} (base={base_weight:.4f}, 1.5x amplified)")
         
-        # 2. Apply ADASYN to balance training data with error handling
-        # ADASYN (Adaptive Synthetic Sampling): Generates more samples near decision boundary
-        # sampling_strategy=0.95: aggressive balancing for extreme imbalance (4.4% minority)
-        minority_class_size = len(y_train[y_train == 0])
-        k_neighbors = min(4, max(1, minority_class_size - 1))  # Increased from 3 to 4
-        
-        try:
-            adasyn = ADASYN(random_state=42, n_neighbors=k_neighbors, sampling_strategy=0.95)
-            X_train_smote, y_train_smote = adasyn.fit_resample(X_train_scaled, y_train)
-            # print(f"   ✅ ADASYN applied: {len(X_train_scaled)} → {len(X_train_smote)} samples (n_neighbors={k_neighbors}, strategy=0.95)")
-            # print(f"   ✅ Balanced class distribution: {pd.Series(y_train_smote).value_counts().to_dict()}")
-        except (ValueError, RuntimeError) as e:
-            # Fallback to SMOTE if ADASYN fails (needs more samples)
-            # print(f"   ⚠️ ADASYN failed ({str(e)}). Trying SMOTE fallback...")
+        # 2. Optional synthetic balancing (can be disabled for strict time-series realism)
+        use_synthetic_sampling = Config.USE_SYNTHETIC_SAMPLING and runtime_flags.risk_profile != "conservative"
+        if use_synthetic_sampling:
+            minority_class_size = len(y_train[y_train == 0])
+            k_neighbors = min(4, max(1, minority_class_size - 1))
             try:
-                smote = SMOTE(random_state=42, k_neighbors=k_neighbors, sampling_strategy=0.9)
-                X_train_smote, y_train_smote = smote.fit_resample(X_train_scaled, y_train)
-                # print(f"   ✅ SMOTE applied (fallback): {len(X_train_scaled)} → {len(X_train_smote)} samples")
-            except ValueError:
-                # print(f"   ⚠️ SMOTE also failed. Using original training data.")
-                X_train_smote, y_train_smote = X_train_scaled, y_train
-                # print(f"   ℹ️ Training without synthetic balancing (scale_pos_weight={scale_pos_weight:.4f})")
+                adasyn = ADASYN(random_state=42, n_neighbors=k_neighbors, sampling_strategy=0.95)
+                X_train_smote, y_train_smote = adasyn.fit_resample(X_train_scaled, y_train)
+            except (ValueError, RuntimeError):
+                try:
+                    smote = SMOTE(random_state=42, k_neighbors=k_neighbors, sampling_strategy=0.9)
+                    X_train_smote, y_train_smote = smote.fit_resample(X_train_scaled, y_train)
+                except ValueError:
+                    X_train_smote, y_train_smote = X_train_scaled, y_train
+        else:
+            X_train_smote, y_train_smote = X_train_scaled, y_train
         
         # === TRAIN MODEL WITH STABILITY-ORIENTED HYPERPARAMETERS ===
         xgb_params = Config.XGB_PARAMS.copy()
@@ -1562,7 +1673,8 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
                 y_val,
                 val_returns,
                 xgb_params,
-                scale_pos_weight
+                scale_pos_weight,
+                max_candidates=effective_tuning_candidates,
             )
             xgb_params = tuned_params_cache.copy()
             # print(
@@ -1580,20 +1692,75 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
             # print(f"   📊 Using optimized hyperparameters for percentile labeling:")
             # print(f"      max_depth={xgb_params['max_depth']}, lr={xgb_params['learning_rate']}, n_estimators={xgb_params['n_estimators']}")
         
-        # Train final XGBoost model
+        # Train final model(s)
         model = xgb.XGBClassifier(**xgb_params)
-        
-        model.fit(
-            X_train_smote, y_train_smote,
-            eval_set=[(X_val_scaled, y_val)],
-            verbose=False
-        )
-        
-        # === PROBABILITY CALIBRATION VIA RISK-ADJUSTMENT ===
-        # Instead of post-hoc calibration, we apply dynamic probability adjustment
-        # based on market volatility (volatility-weighted scaling)
-        # This achieves calibration effect: high-vol periods get conservative probabilities
-        
+        calibration_enabled = False
+        calibration_method_used = "none"
+        calibration_reason = "disabled_by_mode_or_config"
+
+        if Config.ENABLE_REGIME_SPLIT_MODEL:
+            train_high_mask = _compute_regime_mask(X_train_unscaled, X_train_unscaled)
+            n_high = int(np.sum(train_high_mask))
+            n_low = int(len(train_high_mask) - n_high)
+
+            if n_high >= Config.MIN_TRAIN_SIZE // 2 and n_low >= Config.MIN_TRAIN_SIZE // 2:
+                model_low = xgb.XGBClassifier(**xgb_params)
+                model_high = xgb.XGBClassifier(**xgb_params)
+
+                X_train_low = X_train_scaled.loc[~train_high_mask]
+                y_train_low = y_train.loc[~train_high_mask]
+                X_train_high = X_train_scaled.loc[train_high_mask]
+                y_train_high = y_train.loc[train_high_mask]
+
+                model_low.fit(X_train_low, y_train_low, verbose=False)
+                model_high.fit(X_train_high, y_train_high, verbose=False)
+
+                val_high_mask = _compute_regime_mask(X_train_unscaled, X_val_unscaled)
+                proba_preds = np.zeros(len(X_val_scaled), dtype=float)
+                if np.any(~val_high_mask):
+                    proba_preds[~val_high_mask] = model_low.predict_proba(X_val_scaled.loc[~val_high_mask])[:, 1]
+                if np.any(val_high_mask):
+                    proba_preds[val_high_mask] = model_high.predict_proba(X_val_scaled.loc[val_high_mask])[:, 1]
+                model = model_low  # default model for downstream visualizations
+            else:
+                model.fit(
+                    X_train_smote, y_train_smote,
+                    eval_set=[(X_val_scaled, y_val)],
+                    verbose=False
+                )
+                proba_preds = model.predict_proba(X_val_scaled)[:, 1]
+        else:
+            model.fit(
+                X_train_smote, y_train_smote,
+                eval_set=[(X_val_scaled, y_val)],
+                verbose=False
+            )
+            proba_preds = model.predict_proba(X_val_scaled)[:, 1]
+
+        fold_calibration_error = np.nan
+        fold_brier = np.nan
+        if calibration_allowed and not Config.ENABLE_REGIME_SPLIT_MODEL and len(X_train_scaled) >= Config.CALIBRATION_MIN_SAMPLES:
+            method = Config.CALIBRATION_METHOD if len(X_train_scaled) >= 300 else "sigmoid"
+            X_train_np = np.asarray(X_train_scaled[features], dtype=float)
+            X_val_calib = np.asarray(X_val_scaled[features], dtype=float)
+            raw_train_proba = model.predict_proba(X_train_np)[:, 1]
+            split_data = train_calibration_split(X_train_np, y_train.values, raw_train_proba, ratio=0.2)
+            if split_data is not None:
+                proba_calib, y_calib = split_data
+                calibrator, calibration_reason = fit_probability_calibrator_v2(proba_calib, y_calib, method=method)
+                if calibrator is not None:
+                    raw_val_proba = model.predict_proba(X_val_calib)[:, 1]
+                    proba_preds = calibrator.predict_proba(raw_val_proba)[:, 1]
+                    calibration_enabled = True
+                    calibration_method_used = method
+                    cal_stats = calibration_metrics(y_val.values, proba_preds)
+                    fold_calibration_error = cal_stats["ece"]
+                    fold_brier = cal_stats["brier"]
+                else:
+                    calibration_method_used = "none"
+            else:
+                calibration_reason = "invalid_calibration_split"
+
         # === RISK-ADJUSTED LOSS: Apply volatility weighting to predictions ===
         # Extract volatility from validation data for risk adjustment
         # High volatility → require higher confidence for trades (more conservative)
@@ -1604,13 +1771,10 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
         volatility_weights = 1 + (val_volatility - volatility_mean) / (volatility_std + 1e-8)
         volatility_weights = np.clip(volatility_weights, 0.5, 2.5)  # Baseline bounds
         
-        # Generate predictions
-        preds = model.predict(X_val_scaled)
-        proba_preds = model.predict_proba(X_val_scaled)[:, 1]
-        
         # Apply volatility-weighted risk adjustment (conservative during high volatility)
         proba_preds_risk_adjusted = proba_preds / volatility_weights
         proba_preds_risk_adjusted = np.clip(proba_preds_risk_adjusted, 0, 1)
+        preds = (proba_preds_risk_adjusted >= 0.5).astype(int)
         
         # Apply probability thresholding with intelligent position opening strategy
         threshold_buy = Config.PROBABILITY_THRESHOLD_BUY
@@ -1623,8 +1787,12 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
                     threshold_buy, threshold_stats = find_optimal_buy_threshold_sharpe(
                         y_val.values,
                         proba_preds_risk_adjusted,
-                        val_returns,  # Use calculated returns
-                        min_samples=10
+                        val_returns,
+                        min_samples=10,
+                        min_trades_ratio=Config.THRESHOLD_MIN_TRADES_RATIO,
+                        cost_rate=cost_rate,
+                        slippage_rate=slippage_rate,
+                        max_trades_ratio=Config.CONSERVATIVE_MAX_TRADE_RATIO if conservative_mode else None,
                     )
                 else:
                     threshold_buy, threshold_sell, threshold_stats = find_optimal_thresholds_long_short(
@@ -1676,10 +1844,16 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
             prev_threshold_buy = threshold_buy
         else:
             avg_vol_zscore = 0.0
-        
+
+        if conservative_mode:
+            threshold_buy = max(float(threshold_buy), float(Config.CONSERVATIVE_MIN_BUY_THRESHOLD))
+
         # Apply intelligent position opening strategy
         # print(f"   📍 Position Opening: {Config.POSITION_OPENING_MODE.upper()} mode")
-        
+        effective_percentile_threshold = (
+            Config.CONSERVATIVE_PERCENTILE_THRESHOLD if conservative_mode else Config.PERCENTILE_THRESHOLD
+        )
+
         if Config.POSITION_OPENING_MODE == "hybrid":
             # Hybrid mode: threshold + percentile + technical validation
             preds_thresholded = apply_probability_threshold(
@@ -1687,7 +1861,7 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
                 threshold_buy,
                 threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
                 X_features=X_val_unscaled,  # Pass validation features for technical filters
-                percentile_threshold=Config.PERCENTILE_THRESHOLD,
+                percentile_threshold=effective_percentile_threshold,
                 mode='hybrid',
                 trading_mode=Config.TRADING_MODE
             )
@@ -1698,7 +1872,7 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
                 threshold_buy,
                 threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
                 X_features=None,
-                percentile_threshold=Config.PERCENTILE_THRESHOLD,
+                percentile_threshold=effective_percentile_threshold,
                 mode=Config.POSITION_OPENING_MODE,
                 trading_mode=Config.TRADING_MODE
             )
@@ -1722,7 +1896,14 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
                 proba_preds_risk_adjusted,
                 threshold_buy,
                 volatility_zscore=avg_vol_zscore,
-                eligible_mask=(preds_thresholded == 1)
+                eligible_mask=(preds_thresholded == 1),
+                min_confidence=Config.CONSERVATIVE_MIN_CONFIDENCE if conservative_mode else Config.POSITION_SIZE_MIN_CONFIDENCE,
+                uncertainty_band=Config.CONSERVATIVE_UNCERTAINTY_BAND if conservative_mode else Config.POSITION_SIZE_UNCERTAINTY_BAND,
+                vol_penalty=(
+                    Config.POSITION_SIZE_VOL_RISK_PENALTY * Config.CONSERVATIVE_VOL_PENALTY_MULT
+                    if conservative_mode
+                    else Config.POSITION_SIZE_VOL_RISK_PENALTY
+                ),
             )
             print(
                 f"   📏 Position sizing: sized={size_stats['n_sized']}/{size_stats['n_candidates']} "
@@ -1791,20 +1972,43 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
         strategy_returns = val_returns_valid * preds_valid
         position_sizes_valid = position_sizes[valid_mask] if valid_mask.sum() > 0 else position_sizes
         strategy_returns_thresholded = val_returns_valid * position_sizes_valid
+        net_strategy_returns, turnover_series = apply_trading_costs(
+            val_returns_valid,
+            position_sizes_valid,
+            cost_rate=cost_rate,
+            slippage_rate=slippage_rate,
+        )
+        net_stats = evaluate_net_metrics(
+            val_returns_valid,
+            position_sizes_valid,
+            cost_rate=cost_rate,
+            slippage_rate=slippage_rate,
+        )
         
         # === IMPROVED SHARPE/DRAWDOWN CALCULATION ===
         # Calculate for both raw and thresholded predictions
         n_long_positions = np.sum(position_sizes_valid > 0)
         n_long_positions_raw = np.sum(preds_valid == 1)
         valid_days_count = len(preds_thresholded_valid)
+
+        if n_long_positions < Config.MIN_TRADES_PER_FOLD:
+            print(
+                f"⚠️ Fold {fold_idx}: Skipped from aggregate metrics - insufficient trades "
+                f"({n_long_positions} < {Config.MIN_TRADES_PER_FOLD})"
+            )
+            skipped_folds.append({'fold': fold_idx, 'reason': 'insufficient_trades'})
+            stage_profiler.stages["cv_fold"] = stage_profiler.stages.get("cv_fold", 0.0) + (time.perf_counter() - fold_start)
+            continue
         
         # Sharpe & Drawdown for thresholded strategy (actual trading strategy)
         if n_long_positions >= 3:  # Need at least 3 positions for meaningful Sharpe
             sharpe_thresholded = calculate_sharpe_ratio(strategy_returns_thresholded)
             max_dd = calculate_max_drawdown(strategy_returns_thresholded)
+            net_sharpe = calculate_sharpe_ratio(net_strategy_returns)
         else:
             sharpe_thresholded = np.nan
             max_dd = np.nan
+            net_sharpe = np.nan
         
         # Sharpe for raw model (for diagnostic purposes)
         # Note: Raw probabilities (fractional position sizes) typically yield NaN Sharpe
@@ -1825,11 +2029,13 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
         
         # Win rate calculation (only when positions are open)
         if n_long_positions > 0:
-            win_rate = np.sum(strategy_returns_thresholded > 0) / n_long_positions
+            win_rate = np.sum(net_strategy_returns > 0) / n_long_positions
             total_return = np.sum(strategy_returns_thresholded)
+            net_return = np.sum(net_strategy_returns)
         else:
             win_rate = 0
             total_return = 0
+            net_return = 0
         total_return_agg += float(total_return)
         total_wins_agg += int(np.sum(strategy_returns_thresholded > 0))
         total_trades_agg += int(n_long_positions)
@@ -1851,8 +2057,18 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
             'threshold_metric': 'sharpe' if Config.OPTIMIZE_BY_SHARPE else Config.THRESHOLD_OPTIM_METRIC if Config.ENABLE_THRESHOLD_GRIDSEARCH else 'static',
             'adaptive_thresholds': Config.USE_ADAPTIVE_THRESHOLDS,
             'fold_total_return': float(total_return),
+            'net_return': float(net_return),
+            'net_sharpe': float(net_stats.get("net_sharpe", net_sharpe)),
+            'turnover': float(net_stats.get("turnover", np.nansum(turnover_series))),
             'fold_win_rate': float(win_rate),
             'fold_trades': int(n_long_positions),
+            'n_trades_at_threshold': int(threshold_stats.get('n_trades', 0)) if threshold_stats else int(n_long_positions),
+            'trade_ratio_at_threshold': float(threshold_stats.get('trade_ratio', 0.0)) if threshold_stats else float(n_long_positions / max(1, len(preds_thresholded))),
+            'calibration_enabled': bool(calibration_enabled),
+            'calibration_method': calibration_method_used,
+            'calibration_reason': calibration_reason,
+            'calibration_error': float(fold_calibration_error) if np.isfinite(fold_calibration_error) else np.nan,
+            'brier': float(fold_brier) if np.isfinite(fold_brier) else np.nan,
         })
         
         # Store predictions for visualization
@@ -1876,43 +2092,75 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
                 print(f"  → Threshold tuned ({Config.THRESHOLD_OPTIM_METRIC}): {threshold_buy:.4f} | PR: {threshold_stats['precision']:.3f}/{threshold_stats['recall']:.3f} | F1: {threshold_stats['f1']:.3f}")
         print(f"  → AUC: {auc:.4f} | AUCPR: {aucpr:.4f} | Accuracy: {accuracy:.4f} ({accuracy_thresholded:.4f} w/ threshold)")
         print(f"  → Sharpe: {sharpe:.4f} ({sharpe_thresholded:.4f} w/ threshold) | Max DD: {max_dd:.4f}")
+
+        # Always compute fold-level future probability so ensemble is stable
+        # regardless of plotting mode (none/final/all).
+        X_recent = X_val_unscaled.tail(30) if len(X_val_unscaled) >= 30 else X_val_unscaled
+        X_recent_scaled = scaler.transform(X_recent)
+        recent_proba = model.predict_proba(X_recent_scaled)[:, 1]
+        if len(recent_proba) > 0:
+            future_predictions.append({
+                'fold': fold_idx,
+                'probability': float(recent_proba[-1]),
+                'date': df.index[-1]
+            })
         
-        # Generate visualizations for this fold
-        if viz_engine:
-            print(f"   Generating visualizations for Fold {fold_idx}...")
-            try:
-                viz_engine.plot_lstm_xgboost_hybrid(
-                    df=df,
-                    train_data=train_idx,
-                    test_data=val_idx,
-                    lstm_preds=df.loc[X_val_unscaled.index, 'lstm_return_5d'].values if 'lstm_return_5d' in df.columns else np.zeros(len(val_idx)),
-                    xgb_preds=proba_preds,
-                    scaler=scaler,
-                    run_date=run_date,
-                    run_number=f"{run_number}_fold{fold_idx}"
-                )
-                
-                future_prob = viz_engine.plot_future_forecast(
-                    df=df,
-                    lstm_preds=df.loc[X_val_unscaled.index, 'lstm_return_5d'].values if 'lstm_return_5d' in df.columns else np.zeros(len(val_idx)),
-                    xgb_preds=proba_preds,
-                    forecast_horizon=20,
-                    run_date=run_date,
-                    run_number=f"{run_number}_fold{fold_idx}",
-                    latest_model=model,
-                    scaler=scaler,
-                    X_recent=X_val_unscaled.tail(30) if len(X_val_unscaled) >= 30 else X_val_unscaled  # Last 30 days for recent prediction
-                )
-                
-                # Display FUTURE trading recommendation
-                if future_prob is not None:
-                    # Store for final recommendation
-                    future_predictions.append({
-                        'fold': fold_idx,
-                        'probability': future_prob,
-                        'date': df.index[-1]
-                    })
+        # Generate visualizations for this fold (all) or queue last payload (final)
+        if viz_engine and runtime_flags.plots in {"all", "final"}:
+            plot_payload = {
+                "fold_idx": fold_idx,
+                "train_idx": train_idx,
+                "val_idx": val_idx,
+                "run_number": run_number,
+                "run_date": run_date,
+                "model": model,
+                "scaler": scaler,
+                "X_val_unscaled": X_val_unscaled,
+                "proba_preds": proba_preds,
+            }
+            if runtime_flags.plots == "all":
+                print(f"   Generating visualizations for Fold {fold_idx}...")
+            else:
+                last_plot_payload = plot_payload
+            if runtime_flags.plots == "all":
+                plot_start = time.perf_counter()
+                try:
+                    viz_engine.plot_lstm_xgboost_hybrid(
+                        df=df,
+                        train_data=train_idx,
+                        test_data=val_idx,
+                        lstm_preds=df.loc[X_val_unscaled.index, 'lstm_return_5d'].values if 'lstm_return_5d' in df.columns else np.zeros(len(val_idx)),
+                        xgb_preds=proba_preds,
+                        scaler=scaler,
+                        run_date=run_date,
+                        run_number=f"{run_number}_fold{fold_idx}"
+                    )
                     
+                    future_prob = viz_engine.plot_future_forecast(
+                        df=df,
+                        lstm_preds=df.loc[X_val_unscaled.index, 'lstm_return_5d'].values if 'lstm_return_5d' in df.columns else np.zeros(len(val_idx)),
+                        xgb_preds=proba_preds,
+                        forecast_horizon=20,
+                        run_date=run_date,
+                        run_number=f"{run_number}_fold{fold_idx}",
+                        latest_model=model,
+                        scaler=scaler,
+                        X_recent=X_val_unscaled.tail(30) if len(X_val_unscaled) >= 30 else X_val_unscaled
+                    )
+                except Exception as e:
+                    print(f"   ⚠️ Visualization error: {e}")
+                finally:
+                    stage_profiler.stages["plots"] = stage_profiler.stages.get("plots", 0.0) + (time.perf_counter() - plot_start)
+        else:
+            print(f"   Skipping visualizations (mode={runtime_flags.plots})")
+
+        stage_profiler.stages["cv_fold"] = stage_profiler.stages.get("cv_fold", 0.0) + (time.perf_counter() - fold_start)
+
+        # Keep original recommendation prints only in full plot mode.
+        if viz_engine and runtime_flags.plots == "all":
+            try:
+                if future_predictions:
+                    future_prob = future_predictions[-1]["probability"]
                     print(f"\n   " + "="*60)
                     print(f"   🎯 TRADING RECOMMENDATION FOR NEXT 20 DAYS")
                     print(f"   " + "="*60)
@@ -1955,16 +2203,65 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
                     print(f"   " + "="*60 + "\n")
             except Exception as e:
                 print(f"   ⚠️ Visualization error: {e}")
-        else:
-            print(f"   Skipping visualizations (VisualizationEngine not available)")
+
+    if viz_engine and runtime_flags.plots == "final" and last_plot_payload is not None:
+        print(f"   Generating final visualization (fold {last_plot_payload['fold_idx']})...")
+        plot_start = time.perf_counter()
+        try:
+            val_idx = last_plot_payload["val_idx"]
+            X_val_unscaled = last_plot_payload["X_val_unscaled"]
+            proba_preds = last_plot_payload["proba_preds"]
+            scaler = last_plot_payload["scaler"]
+            model = last_plot_payload["model"]
+            fold_idx = last_plot_payload["fold_idx"]
+            run_number_plot = last_plot_payload["run_number"]
+            run_date_plot = last_plot_payload["run_date"]
+
+            viz_engine.plot_lstm_xgboost_hybrid(
+                df=df,
+                train_data=last_plot_payload["train_idx"],
+                test_data=val_idx,
+                lstm_preds=df.loc[X_val_unscaled.index, 'lstm_return_5d'].values if 'lstm_return_5d' in df.columns else np.zeros(len(val_idx)),
+                xgb_preds=proba_preds,
+                scaler=scaler,
+                run_date=run_date_plot,
+                run_number=f"{run_number_plot}_fold{fold_idx}"
+            )
+            future_prob = viz_engine.plot_future_forecast(
+                df=df,
+                lstm_preds=df.loc[X_val_unscaled.index, 'lstm_return_5d'].values if 'lstm_return_5d' in df.columns else np.zeros(len(val_idx)),
+                xgb_preds=proba_preds,
+                forecast_horizon=20,
+                run_date=run_date_plot,
+                run_number=f"{run_number_plot}_fold{fold_idx}",
+                latest_model=model,
+                scaler=scaler,
+                X_recent=X_val_unscaled.tail(30) if len(X_val_unscaled) >= 30 else X_val_unscaled
+            )
+        except Exception as e:
+            print(f"   ⚠️ Final visualization error: {e}")
+        finally:
+            stage_profiler.stages["plots"] = stage_profiler.stages.get("plots", 0.0) + (time.perf_counter() - plot_start)
 
     # === DISPLAY FINAL RESULTS ===
     if not fold_results:
         print("\n❌ No valid folds to evaluate. Check data and parameters.")
-        return
+        return {
+            "future_predictions": [],
+            "metrics": {},
+            "cv": {"n_folds_valid": 0, "n_folds_skipped": len(skipped_folds)},
+            "artifacts": {},
+            "timings": stage_profiler.summary(),
+        }
     
     cv_summary = summarize_cv_results(fold_results, skipped_folds)
     results_df = cv_summary['results_df']
+    coverage_ratio = float(cv_summary['n_folds_valid'] / max(1, cv_summary['configured_folds']))
+    if coverage_ratio < Config.MIN_COVERAGE_RATIO:
+        print(
+            f"⚠️ Coverage ratio below target: {coverage_ratio:.3f} < {Config.MIN_COVERAGE_RATIO:.3f}. "
+            "Treat recommendation as low reliability."
+        )
     print(
         f"\nConfigured folds: {cv_summary['configured_folds']} | "
         f"Executed valid folds: {cv_summary['n_folds_valid']} | "
@@ -1987,11 +2284,22 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
     print(f"Accuracy (threshold): {results_df['accuracy_thresholded'].mean():.4f} ± {results_df['accuracy_thresholded'].std():.4f}")
     print(f"Sharpe Ratio:         {results_df['sharpe'].mean():.4f} ± {results_df['sharpe'].std():.4f}")
     print(f"Sharpe (threshold):   {results_df['sharpe_thresholded'].mean():.4f} ± {results_df['sharpe_thresholded'].std():.4f}")
+    if 'net_sharpe' in results_df:
+        print(f"Net Sharpe:           {results_df['net_sharpe'].mean():.4f} ± {results_df['net_sharpe'].std():.4f}")
+    if 'net_return' in results_df:
+        print(f"Net Return:           {results_df['net_return'].mean():.4f} ± {results_df['net_return'].std():.4f}")
+    if 'turnover' in results_df:
+        print(f"Turnover:             {results_df['turnover'].mean():.4f} ± {results_df['turnover'].std():.4f}")
+    print(f"Coverage Ratio:       {coverage_ratio:.4f}")
     print(f"Max Drawdown:         {results_df['max_drawdown'].mean():.4f} ± {results_df['max_drawdown'].std():.4f}")
     print("="*80)
 
     # Log results to accumulative JSON log
     print("\n📊 Logging results to accumulative JSON...")
+    recommendation_quality = np.nan
+    if future_predictions:
+        pvals = np.array([p.get("probability", 0.5) for p in future_predictions], dtype=float)
+        recommendation_quality = float(np.clip(1.0 - (np.std(pvals) * 4.0), 0.0, 1.0))
     run_config = {
         'run_number': run_number,
         'run_date': run_date.split('_')[0],
@@ -2006,20 +2314,39 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
             'n_folds_valid': cv_summary['n_folds_valid'],
             'n_folds_skipped': cv_summary['n_folds_skipped'],
             'skip_reasons': cv_summary['skip_reasons'],
+            'coverage_ratio': coverage_ratio,
         },
         'features_contract': feature_contract or {},
         'metrics': {
             'accuracy': float(results_df['accuracy'].mean()),
+            'accuracy_std': float(results_df['accuracy'].std()),
             'precision': float(results_df['precision'].mean()),
             'recall': float(results_df['recall'].mean()),
             'f1': float(results_df['f1'].mean()),
             'auc': float(results_df['auc'].mean()),
+            'auc_std': float(results_df['auc'].std()),
             'auc_pr': float(results_df['aucpr'].mean()),
-            'threshold_buy_mean': float(results_df['threshold_buy'].mean()) if 'threshold_buy' in results_df else Config.PROBABILITY_THRESHOLD_BUY
+            'auc_pr_std': float(results_df['aucpr'].std()),
+            'sharpe_thresholded_mean': float(results_df['sharpe_thresholded'].mean()),
+            'sharpe_thresholded_std': float(results_df['sharpe_thresholded'].std()),
+            'threshold_buy_mean': float(results_df['threshold_buy'].mean()) if 'threshold_buy' in results_df else Config.PROBABILITY_THRESHOLD_BUY,
+            'min_fold_trades': int(results_df['fold_trades'].min()) if 'fold_trades' in results_df else 0,
+            'median_fold_trades': float(results_df['fold_trades'].median()) if 'fold_trades' in results_df else 0.0,
+            'worst_fold_auc': float(results_df['auc'].min()) if 'auc' in results_df else 0.0,
+            'worst_fold_aucpr': float(results_df['aucpr'].min()) if 'aucpr' in results_df else 0.0,
+            'std_fold_sharpe_thresholded': float(results_df['sharpe_thresholded'].std()) if 'sharpe_thresholded' in results_df else 0.0,
+            'calibration_enabled': bool(results_df['calibration_enabled'].any()) if 'calibration_enabled' in results_df else False,
+            'calibration_method': str(results_df['calibration_method'].mode().iloc[0]) if 'calibration_method' in results_df and not results_df['calibration_method'].mode().empty else 'none',
+            'calibration_error': float(results_df['calibration_error'].mean()) if 'calibration_error' in results_df else np.nan,
+            'brier': float(results_df['brier'].mean()) if 'brier' in results_df else np.nan,
         },
         'sharpe_ratio': float(results_df['sharpe'].mean()),
+        'net_sharpe': float(results_df['net_sharpe'].mean()) if 'net_sharpe' in results_df else np.nan,
         'max_drawdown': float(results_df['max_drawdown'].mean()),
         'total_return': float(total_return_agg),
+        'net_return': float(results_df['net_return'].sum()) if 'net_return' in results_df else np.nan,
+        'turnover': float(results_df['turnover'].sum()) if 'turnover' in results_df else np.nan,
+        'recommendation_quality': recommendation_quality,
         'win_rate': float(total_wins_agg / total_trades_agg) if total_trades_agg > 0 else 0.0,
         'xgb_params': Config.XGB_PARAMS,
         'lstm_config': {
@@ -2030,11 +2357,24 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
         'buy_signals': int(np.sum([np.sum(p > 0.65) for p in all_val_proba])),
         'sell_signals': int(np.sum([np.sum(p < 0.35) for p in all_val_proba])) if Config.TRADING_MODE == "long_short" else 0,
         'hold_signals': int(np.sum([np.sum((p >= 0.35) & (p <= 0.65)) for p in all_val_proba])),
-        'visualization_file': f'out/lstm_xgboost_hybrid_run_{run_number}_*',
-        'forecast_file': f'out/future_forecast_run_{run_number}_*',
+        'visualization_file': f'out/lstm_xgboost_hybrid_run_{run_number}_*' if runtime_flags.plots != "none" else '',
+        'forecast_file': f'out/future_forecast_run_{run_number}_*' if runtime_flags.plots != "none" else '',
+        'runtime': {
+            'mode': runtime_flags.mode,
+            'plots': runtime_flags.plots,
+            'cache': runtime_flags.cache,
+            'profile': runtime_flags.profile,
+            'objective': runtime_flags.objective,
+            'risk_profile': runtime_flags.risk_profile,
+            'cost_bps': runtime_flags.cost_bps,
+            'slippage_bps': runtime_flags.slippage_bps,
+            'cv_scheme': runtime_flags.cv_scheme,
+        },
+        'timings': stage_profiler.summary(),
         'notes': (
             f"Configured folds={cv_summary['configured_folds']}, valid={cv_summary['n_folds_valid']}, "
-            f"min_validation={Config.MIN_VALIDATION_SIZE}, trading_mode={Config.TRADING_MODE}"
+            f"min_validation={Config.MIN_VALIDATION_SIZE}, trading_mode={Config.TRADING_MODE}, "
+            f"mode={runtime_flags.mode}, plots={runtime_flags.plots}"
         )
     }
     
@@ -2064,127 +2404,234 @@ def train_and_evaluate_timeseries(df, feature_contract: Optional[Dict[str, Any]]
     except Exception as e:
         print(f"\nCould not generate feature importances: {e}")
     
-    # Return future predictions for final recommendation
-    return future_predictions
+    return {
+        "future_predictions": future_predictions,
+        "metrics": run_config.get("metrics", {}),
+        "cv": run_config.get("cv", {}),
+        "artifacts": {
+            "visualization_file": run_config.get("visualization_file", ""),
+            "forecast_file": run_config.get("forecast_file", ""),
+        },
+        "timings": stage_profiler.summary(),
+    }
 
-def main():
-    # Display Rich UI header
-    ui.display_header()
-    
-    # === TICKER SELECTION WITH RICH UI ===
-    ui.select_asset()
-    selected_ticker = ui.selected_ticker
-    selected_name = ui.selected_name
-    
-    # Update config with selected ticker
-    Config.TICKER = selected_ticker
-    
-    # 1. Fetch data for the last N years
-    start_date = (datetime.today() - timedelta(days=Config.TRAINING_YEARS * 365)).strftime('%Y-%m-%d')
-    
-    main_df = fetch_data(
-        Config.TICKER, Config.VIX_TICKER, start_date, Config.END_DATE
+def _build_run_config(runtime: RuntimeFlags, ticker: str, start_date: str) -> RunConfig:
+    return RunConfig(
+        data=DataConfig(
+            ticker=ticker,
+            vix_ticker=Config.VIX_TICKER,
+            start_date=start_date,
+            end_date=Config.END_DATE,
+        ),
+        features=FeatureConfig(min_features=Config.MIN_FEATURES),
+        labeling=LabelingConfig(
+            tp_multiplier=Config.LABEL_TP_MULTIPLIER,
+            sl_multiplier=Config.LABEL_SL_MULTIPLIER,
+            horizon_days=Config.LABEL_HORIZON_DAYS,
+        ),
+        training=TrainingConfig(
+            n_splits=Config.N_SPLITS,
+            min_validation_size=Config.MIN_VALIDATION_SIZE,
+            use_sliding_window=(runtime.cv_scheme == "sliding"),
+            sliding_window_size=Config.SLIDING_WINDOW_SIZE,
+            validation_window_size=Config.VALIDATION_WINDOW_SIZE,
+        ),
+        risk=RiskConfig(
+            dynamic_risk_type=Config.DYNAMIC_RISK_TYPE,
+            dynamic_risk_k_tp=Config.DYNAMIC_RISK_K_TP,
+            dynamic_risk_k_sl=Config.DYNAMIC_RISK_K_SL,
+            dynamic_risk_vol_metric=Config.DYNAMIC_RISK_VOL_METRIC,
+            cost_bps=runtime.cost_bps,
+            slippage_bps=runtime.slippage_bps,
+        ),
+        runtime=runtime,
     )
-    
-    if not main_df.empty:
-        # 2. Generate LSTM regime features (before other features)
-        main_df = generate_lstm_regime_features(main_df.copy(), Config.TICKER)
 
-        # 3. Engineer base features
-        main_df = engineer_features(main_df)
-        
-        # 4. Apply optimized advanced feature engineering
-        main_df = create_advanced_features(main_df)
-        
-        # 5. Remove highly correlated features (CONSERVATIVE: only >0.98 correlation)
-        #    Protects top-importance features from elimination
-        main_df, dropped_corr = remove_correlated_features(main_df, threshold=0.98)
-        
-        # 6. Remove known low-importance features (adaptive filtering)
-        main_df, dropped_low_imp = filter_low_importance_features(main_df)
-        
-        feature_contract = resolve_feature_contract(
-            main_df,
-            seed_features=Config.FEATURES_TO_SCALE,
-            removed_by_corr=dropped_corr,
-            removed_by_importance=dropped_low_imp,
-            min_features=Config.MIN_FEATURES,
-        )
-        print(f"\n📊 Feature engineering summary:")
-        print(f"   • Requested seed features: {len(feature_contract['requested'])}")
-        print(f"   • Available from seed: {len(feature_contract['available'])}")
-        print(f"   • Correlation-based drops: {len(feature_contract['removed_by_corr'])}")
-        print(f"   • Low-importance drops: {len(feature_contract['removed_by_importance'])}")
-        print(f"   • Final contract features: {len(feature_contract['final'])}")
-        if feature_contract['missing_unexpected']:
-            print(f"   • Unexpected missing: {feature_contract['missing_unexpected']}")
-        
-        # 7. Define target
-        main_df = define_target(main_df)
-        
-        # 6. Basic preprocessing (NO scaling - done per fold)
-        processed_df = preprocess_data_raw(main_df.copy(), feature_contract=feature_contract)
-        
-        # 7. Train and evaluate with TimeSeriesSplit (PREVENTS DATA LEAKAGE)
-        if not processed_df.empty:
-            print("\n👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑")
-            future_preds = train_and_evaluate_timeseries(
-                processed_df,
-                feature_contract=feature_contract
-            )
-            
-            # === FINAL CONSOLIDATED RECOMMENDATION ===
-            if future_preds and len(future_preds) > 0:
-                # Get latest price and targets
-                last_price = main_df['close'].iloc[-1]
-                last_date = main_df.index[-1]
-                if Config.DYNAMIC_RISK_VOL_METRIC == 'atr_14d' and 'atr' in main_df.columns:
-                    latest_volatility = float(pd.to_numeric(main_df['atr'], errors='coerce').ffill().iloc[-1])
-                    vol_metric_used = 'atr_14d'
-                elif 'volatility_20' in main_df.columns:
-                    latest_volatility = float(pd.to_numeric(main_df['volatility_20'], errors='coerce').ffill().iloc[-1])
-                    vol_metric_used = 'rolling_std_20d'
-                else:
-                    latest_volatility = float(pd.to_numeric(main_df['close'], errors='coerce').rolling(window=20).std().ffill().iloc[-1])
-                    vol_metric_used = 'rolling_std_20d'
 
-                profit_target = last_price + (latest_volatility * Config.DYNAMIC_RISK_K_TP)
-                stop_loss = last_price - (latest_volatility * Config.DYNAMIC_RISK_K_SL)
+def run_pipeline(run_config: RunConfig, selected_name: Optional[str] = None):
+    cache = CacheManager(enabled=run_config.runtime.cache_enabled)
+    profiler = StageProfiler(enabled=run_config.runtime.profile_enabled)
+    Config.TICKER = run_config.data.ticker
 
-                dynamic_risk_config = {
-                    "dynamic_risk": {
-                        "type": Config.DYNAMIC_RISK_TYPE,
-                        "params": {
-                            "k_tp": Config.DYNAMIC_RISK_K_TP,
-                            "k_sl": Config.DYNAMIC_RISK_K_SL,
-                            "vol_metric": vol_metric_used
-                        }
-                    }
-                }
-                
-                # Ensemble: Average probability from all folds
-                avg_prob = np.mean([p['probability'] for p in future_preds])
-                max_prob = np.max([p['probability'] for p in future_preds])
-                min_prob = np.min([p['probability'] for p in future_preds])
-                
-                # Display with Rich UI
-                ui.show_final_summary(selected_ticker, future_preds)
-                recommendation = ui.show_recommendation(
-                    avg_prob,
-                    last_price,
-                    profit_target,
-                    stop_loss,
-                    last_date.strftime('%Y-%m-%d'),
-                    dynamic_risk_config=dynamic_risk_config
-                )
-                
-                ui.show_success("Pipeline execution completed successfully!")
-        else:
-            ui.show_error("No data left after preprocessing. Check data quality and date ranges.")
-    else:
+    main_df = load_market_data(
+        fetch_fn=fetch_data,
+        ticker=run_config.data.ticker,
+        vix_ticker=run_config.data.vix_ticker,
+        start_date=run_config.data.start_date,
+        end_date=run_config.data.end_date,
+        runtime=run_config.runtime,
+        cache=cache,
+        profiler=profiler,
+    )
+    if main_df.empty:
         ui.show_error("Failed to fetch initial data. Check tickers and network connection.")
-        
+        return {}
+
+    main_df, feature_contract = run_feature_pipeline(
+        df=main_df,
+        ticker=run_config.data.ticker,
+        runtime=run_config.runtime,
+        cache=cache,
+        profiler=profiler,
+        generate_lstm_fn=generate_lstm_regime_features,
+        engineer_features_fn=engineer_features,
+        create_advanced_features_fn=create_advanced_features,
+        remove_correlated_features_fn=remove_correlated_features,
+        filter_low_importance_features_fn=filter_low_importance_features,
+        resolve_feature_contract_fn=resolve_feature_contract,
+        seed_features=Config.FEATURES_TO_SCALE,
+        min_features=run_config.features.min_features,
+        leakage_safe_lstm=(Config.LSTM_LEAKAGE_SAFE_MODE and run_config.runtime.mode == "full"),
+        placeholder_lstm_fn=generate_placeholder_lstm_features,
+    )
+
+    print(f"\n📊 Feature engineering summary:")
+    print(f"   • Requested seed features: {len(feature_contract['requested'])}")
+    print(f"   • Available from seed: {len(feature_contract['available'])}")
+    print(f"   • Correlation-based drops: {len(feature_contract['removed_by_corr'])}")
+    print(f"   • Low-importance drops: {len(feature_contract['removed_by_importance'])}")
+    print(f"   • Final contract features: {len(feature_contract['final'])}")
+    if feature_contract['missing_unexpected']:
+        print(f"   • Unexpected missing: {feature_contract['missing_unexpected']}")
+
+    labeled_df, processed_df = run_labeling_pipeline(
+        df=main_df,
+        feature_contract=feature_contract,
+        runtime=run_config.runtime,
+        cache=cache,
+        profiler=profiler,
+        define_target_fn=define_target,
+        preprocess_data_raw_fn=preprocess_data_raw,
+        label_signature={
+            "tp": run_config.labeling.tp_multiplier,
+            "sl": run_config.labeling.sl_multiplier,
+            "horizon": run_config.labeling.horizon_days,
+        },
+    )
+
+    if processed_df.empty:
+        ui.show_error("No data left after preprocessing. Check data quality and date ranges.")
+        return {}
+
+    print("\n👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑")
+    train_result = run_training_pipeline(
+        train_fn=train_and_evaluate_timeseries,
+        df=processed_df,
+        feature_contract=feature_contract,
+        runtime=run_config.runtime,
+        profiler=profiler,
+    )
+
+    future_preds = train_result.get("future_predictions", [])
+    if future_preds:
+        last_price = labeled_df['close'].iloc[-1]
+        last_date = labeled_df.index[-1]
+        vol_info = latest_volatility_for_risk(labeled_df, run_config.risk.dynamic_risk_vol_metric)
+        profit_target = last_price + (vol_info["volatility"] * run_config.risk.dynamic_risk_k_tp)
+        stop_loss = last_price - (vol_info["volatility"] * run_config.risk.dynamic_risk_k_sl)
+        dynamic_risk_config = build_dynamic_risk_config(
+            run_config.risk.dynamic_risk_type,
+            run_config.risk.dynamic_risk_k_tp,
+            run_config.risk.dynamic_risk_k_sl,
+            vol_info["metric"],
+        )
+        prob_summary = summarize_future_predictions(future_preds)
+        tp_pct = (profit_target - last_price) / max(1e-9, last_price)
+        sl_pct = (stop_loss - last_price) / max(1e-9, last_price)
+        dynamic_threshold = {
+            "conservative": 0.68,
+            "balanced": 0.62,
+            "aggressive": 0.55,
+        }.get(run_config.runtime.risk_profile, 0.68)
+        cost_pct = (run_config.runtime.cost_bps + run_config.runtime.slippage_bps) / 10000.0
+        decision = conservative_recommendation(
+            probability=prob_summary["avg_prob"],
+            dynamic_threshold=dynamic_threshold,
+            tp_pct=float(tp_pct),
+            sl_pct=float(sl_pct),
+            cost_pct=cost_pct,
+            regime_allowed=True,
+        )
+
+        ui.show_final_summary(run_config.data.ticker, future_preds)
+        ui.show_recommendation(
+            prob_summary["avg_prob"],
+            last_price,
+            profit_target,
+            stop_loss,
+            last_date.strftime('%Y-%m-%d'),
+            dynamic_risk_config=dynamic_risk_config
+        )
+        print(
+            f"   🧭 Decision state: {decision.state} | EV={decision.expected_value:.5f} | "
+            f"Quality={decision.recommendation_quality:.3f} | reason={decision.reasons}"
+        )
+        ui.show_success("Pipeline execution completed successfully!")
+
+    if run_config.runtime.profile_enabled:
+        print("\n⏱️ Stage profiling summary:")
+        for stage, seconds in profiler.summary().items():
+            print(f"   - {stage}: {seconds:.3f}s")
     ui.show_success("Pipeline finished.")
+
+    return {
+        "train_result": train_result,
+        "profile": profiler.summary(),
+    }
+
+
+def _parse_cli_args(argv=None):
+    parser = argparse.ArgumentParser(description="ForecastTRADE runtime")
+    parser.add_argument("--ticker", default=None, help="Ticker symbol (if omitted, interactive UI is used)")
+    parser.add_argument("--mode", default="full", choices=["full", "fast"], help="Runtime mode")
+    parser.add_argument("--plots", default="all", choices=["none", "final", "all"], help="Plot generation mode")
+    parser.add_argument("--cache", default="on", choices=["on", "off"], help="Enable/disable local cache")
+    parser.add_argument("--profile", default="on", choices=["on", "off"], help="Enable/disable profiling")
+    parser.add_argument("--config", default=None, help="Path to YAML config file")
+    parser.add_argument("--objective", default=None, choices=["sharpe_net", "return", "max_winrate"], help="Primary optimization objective")
+    parser.add_argument("--risk-profile", default=None, choices=["conservative", "balanced", "aggressive"], help="Risk policy profile")
+    parser.add_argument("--cost-bps", default=None, type=float, help="Transaction cost in bps")
+    parser.add_argument("--slippage-bps", default=None, type=float, help="Slippage in bps")
+    parser.add_argument("--cv-scheme", default=None, choices=["sliding", "purged"], help="Cross-validation scheme")
+    parser.add_argument("--no-ui", action="store_true", help="Disable interactive ticker selection")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = _parse_cli_args(argv)
+    external = load_external_config(args.config)
+    apply_config_overrides(Config, external)
+    set_global_seed(int(getattr(Config, "SEED", 42)))
+    runtime = RuntimeFlags.normalize(
+        args.mode,
+        args.plots,
+        args.cache,
+        args.profile,
+        objective=args.objective or getattr(Config, "OBJECTIVE", "sharpe_net"),
+        risk_profile=args.risk_profile or getattr(Config, "RISK_PROFILE", "conservative"),
+        cost_bps=float(args.cost_bps if args.cost_bps is not None else getattr(Config, "COST_BPS", 20.0)),
+        slippage_bps=float(args.slippage_bps if args.slippage_bps is not None else getattr(Config, "SLIPPAGE_BPS", 5.0)),
+        cv_scheme=args.cv_scheme or getattr(Config, "CV_SCHEME", "sliding"),
+        config_path=args.config,
+    )
+
+    selected_ticker = args.ticker
+    selected_name = args.ticker
+
+    if not args.no_ui:
+        ui.display_header()
+        if not selected_ticker:
+            ui.select_asset()
+            selected_ticker = ui.selected_ticker
+            selected_name = ui.selected_name
+
+    if not selected_ticker:
+        selected_ticker = Config.TICKER
+        selected_name = selected_ticker
+
+    start_date = (datetime.today() - timedelta(days=Config.TRAINING_YEARS * 365)).strftime('%Y-%m-%d')
+    run_config = _build_run_config(runtime, selected_ticker, start_date)
+    return run_pipeline(run_config, selected_name=selected_name)
 
 
 # --- MAIN EXECUTION ---

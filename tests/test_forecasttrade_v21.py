@@ -63,6 +63,22 @@ class MainLogicTests(unittest.TestCase):
         self.assertEqual(contract["missing_unexpected"], [])
         self.assertEqual(set(contract["final"]), {"lstm_latent_0", "macd", "atr", "ema_short"})
 
+    def test_threshold_optimization_respects_min_trades_ratio(self):
+        y_true = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
+        proba = np.array([0.99, 0.10, 0.98, 0.11, 0.97, 0.12, 0.55, 0.20, 0.54, 0.30])
+        returns = np.array([0.02, -0.01, 0.03, -0.02, 0.01, -0.015, 0.02, -0.01, 0.01, -0.01])
+
+        threshold_buy, stats = find_optimal_buy_threshold_sharpe(
+            y_true,
+            proba,
+            returns,
+            min_samples=1,
+            min_trades_ratio=0.3,
+        )
+
+        self.assertIsInstance(threshold_buy, float)
+        self.assertGreaterEqual(stats.get("trade_ratio", 0.0), 0.3)
+
     def test_summarize_cv_results_counts_valid_and_skipped(self):
         fold_results = [{"fold": 1, "auc": 0.5}, {"fold": 2, "auc": 0.6}]
         skipped = [{"fold": 3, "reason": "insufficient_validation_size"}]

@@ -38,10 +38,11 @@ class AccumulativeRunLogger:
                     'created': datetime.now().isoformat(),
                     'description': 'Accumulative log of LSTM-XGBoost hybrid model runs',
                     'total_runs': 0,
-                    'best_auc': 0.0,
-                    'best_accuracy': 0.0,
-                    'best_sharpe': -np.inf
-                },
+                'best_auc': 0.0,
+                'best_accuracy': 0.0,
+                'best_sharpe': -np.inf,
+                'best_net_sharpe': -np.inf,
+            },
                 'runs': []
             }
     
@@ -103,10 +104,16 @@ class AccumulativeRunLogger:
             # Financial Metrics
             'financial_metrics': {
                 'sharpe_ratio': float(run_config.get('sharpe_ratio', 0)),
+                'net_sharpe': float(run_config.get('net_sharpe', np.nan)),
                 'max_drawdown': float(run_config.get('max_drawdown', 0)),
                 'total_return': float(run_config.get('total_return', 0)),
+                'net_return': float(run_config.get('net_return', np.nan)),
+                'turnover': float(run_config.get('turnover', np.nan)),
                 'win_rate': float(run_config.get('win_rate', 0))
             },
+            'coverage_ratio': float(run_config.get('cv', {}).get('coverage_ratio', np.nan)),
+            'calibration_error': float(run_config.get('metrics', {}).get('calibration_error', np.nan)),
+            'recommendation_quality': float(run_config.get('recommendation_quality', np.nan)),
             
             # Model Configuration
             'xgboost_config': run_config.get('xgb_params', {}),
@@ -124,6 +131,8 @@ class AccumulativeRunLogger:
                 'visualization': run_config.get('visualization_file', ''),
                 'forecast': run_config.get('forecast_file', '')
             },
+            'runtime': run_config.get('runtime', {}),
+            'timings': run_config.get('timings', {}),
             
             # Notes
             'notes': run_config.get('notes', '')
@@ -148,6 +157,7 @@ class AccumulativeRunLogger:
         auc = run_entry['metrics']['auc_roc']
         accuracy = run_entry['metrics']['accuracy']
         sharpe = run_entry['financial_metrics']['sharpe_ratio']
+        net_sharpe = run_entry['financial_metrics'].get('net_sharpe', np.nan)
         
         if auc > self.runs['metadata'].get('best_auc', 0):
             self.runs['metadata']['best_auc'] = auc
@@ -155,6 +165,8 @@ class AccumulativeRunLogger:
             self.runs['metadata']['best_accuracy'] = accuracy
         if sharpe > self.runs['metadata'].get('best_sharpe', -np.inf):
             self.runs['metadata']['best_sharpe'] = sharpe
+        if np.isfinite(net_sharpe) and net_sharpe > self.runs['metadata'].get('best_net_sharpe', -np.inf):
+            self.runs['metadata']['best_net_sharpe'] = float(net_sharpe)
         
         # Average metrics
         all_aucs = [r['metrics']['auc_roc'] for r in self.runs['runs']]
@@ -194,6 +206,7 @@ class AccumulativeRunLogger:
 ║ Best AUC: {self.runs['metadata'].get('best_auc', 0):.4f}                              ║
 ║ Best Accuracy: {self.runs['metadata'].get('best_accuracy', 0):.4f}                      ║
 ║ Best Sharpe Ratio: {self.runs['metadata'].get('best_sharpe', 0):.4f}                  ║
+║ Best Net Sharpe: {self.runs['metadata'].get('best_net_sharpe', 0):.4f}                   ║
 ║                                                            ║
 ║ Average AUC: {self.runs['metadata'].get('average_auc', 0):.4f}                         ║
 ║ Average Accuracy: {self.runs['metadata'].get('average_accuracy', 0):.4f}                 ║
@@ -240,8 +253,14 @@ class AccumulativeRunLogger:
                 'recall': run['metrics']['recall'],
                 'f1': run['metrics']['f1_score'],
                 'sharpe_ratio': run['financial_metrics']['sharpe_ratio'],
+                'net_sharpe': run['financial_metrics'].get('net_sharpe'),
                 'max_drawdown': run['financial_metrics']['max_drawdown'],
                 'total_return': run['financial_metrics']['total_return'],
+                'net_return': run['financial_metrics'].get('net_return'),
+                'turnover': run['financial_metrics'].get('turnover'),
+                'coverage_ratio': run.get('coverage_ratio'),
+                'calibration_error': run.get('calibration_error'),
+                'recommendation_quality': run.get('recommendation_quality'),
                 'buy_signals': run['predictions']['buy_signals'],
                 'sell_signals': run['predictions']['sell_signals']
             }
