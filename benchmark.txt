@@ -1,0 +1,1446 @@
+
+📊 Feature engineering summary:
+   • Requested seed features: 32
+   • Available from seed: 25
+   • Correlation-based drops: 16
+   • Low-importance drops: 8
+   • Final contract features: 25
+
+👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only | mode=full | plots=none
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 6 sliding window splits
+
+--- Fold 1/6 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-09-15 (400 samples)
+Valid: 2022-09-16 to 2023-03-29 (120 samples)
+Class distribution in validation: {1.0: 64, 0.0: 56}
+   ✅ Positions opened: 1/120 (0.8%)
+   🔎 Filter rejections: threshold=78 | percentile=29 | technical=12 | regime_gate=0 | threshold_relaxed=1
+   📏 Position sizing: sized=1/1 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.505
+
+   📊 Backtest Results (Validation Period):
+      Period: 2022-09-16 to 2023-03-29
+      Winning trades: 1/1 (100.0% win rate)
+      Avoided losses: 56 (correctly predicted losers)
+⚠️ Fold 1: Skipped from aggregate metrics - insufficient trades (1 < 3)
+
+--- Fold 2/6 (TimeSeriesSplit) ---
+Train: 2021-06-18 to 2023-03-29 (400 samples)
+Valid: 2023-03-30 to 2023-10-10 (120 samples)
+Class distribution in validation: {1.0: 77, 0.0: 43}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=62 | percentile=5 | technical=15 | regime_gate=12 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-03-30 to 2023-10-10
+      Winning trades: 11/26 (42.3% win rate)
+      Losing trades: 15
+      Avoided losses: 28 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000001
+      Std dev: 0.006484
+      Min/Max: -0.023977 / 0.039800
+      Long positions: 26
+  → AUC: 0.3159 | AUCPR: 0.5591 | Accuracy: 0.3250 (0.3250 w/ threshold)
+  → Sharpe: 0.5762 (-0.1924 w/ threshold) | Max DD: -0.0548
+   Skipping visualizations (mode=none)
+
+--- Fold 3/6 (TimeSeriesSplit) ---
+Train: 2022-01-11 to 2023-10-10 (400 samples)
+Valid: 2023-10-11 to 2024-05-16 (120 samples)
+Class distribution in validation: {1.0: 61, 0.0: 59}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=64 | percentile=9 | technical=13 | regime_gate=8 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-10-11 to 2024-05-16
+      Winning trades: 9/26 (34.6% win rate)
+      Losing trades: 17
+      Avoided losses: 42 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000437
+      Std dev: 0.005884
+      Min/Max: -0.029572 / 0.026600
+      Long positions: 26
+  → AUC: 0.4290 | AUCPR: 0.4547 | Accuracy: 0.4583 (0.4250 w/ threshold)
+  → Sharpe: 1.3804 (0.9644 w/ threshold) | Max DD: -0.0323
+   Skipping visualizations (mode=none)
+
+--- Fold 4/6 (TimeSeriesSplit) ---
+Train: 2022-07-21 to 2024-05-16 (400 samples)
+Valid: 2024-05-17 to 2024-11-26 (120 samples)
+Class distribution in validation: {0.0: 60, 1.0: 60}
+   ✅ Positions opened: 19/120 (15.8%)
+   🔎 Filter rejections: threshold=61 | percentile=25 | technical=15 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=19/19 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.683
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-05-17 to 2024-11-26
+      Winning trades: 14/19 (73.7% win rate)
+      Losing trades: 5
+      Avoided losses: 55 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000151
+      Std dev: 0.002533
+      Min/Max: -0.019014 / 0.008543
+      Long positions: 19
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: 1.25 | WinRate: 60.0%
+  → AUC: 0.8296 | AUCPR: 0.8049 | Accuracy: 0.7583 (0.5750 w/ threshold)
+  → Sharpe: 1.3476 (0.4478 w/ threshold) | Max DD: -0.0193
+   Skipping visualizations (mode=none)
+
+--- Fold 5/6 (TimeSeriesSplit) ---
+Train: 2023-01-20 to 2024-11-26 (400 samples)
+Valid: 2024-11-27 to 2025-06-17 (120 samples)
+Class distribution in validation: {0.0: 75, 1.0: 45}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=67 | percentile=9 | technical=33 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.776
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-11-27 to 2025-06-17
+      Winning trades: 5/11 (45.5% win rate)
+      Losing trades: 6
+      Avoided losses: 69 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000079
+      Std dev: 0.003571
+      Min/Max: -0.013426 / 0.032055
+      Long positions: 11
+  → AUC: 0.5481 | AUCPR: 0.4043 | Accuracy: 0.5333 (0.6167 w/ threshold)
+  → Sharpe: -0.3469 (-0.0014 w/ threshold) | Max DD: -0.0356
+   Skipping visualizations (mode=none)
+
+--- Fold 6/6 (TimeSeriesSplit) ---
+Train: 2023-08-07 to 2025-06-17 (400 samples)
+Valid: 2025-06-18 to 2026-01-12 (120 samples)
+Class distribution in validation: {0.0: 61, 1.0: 59}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=66 | percentile=36 | technical=7 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.169
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-06-18 to 2026-01-12
+      Winning trades: 7/11 (63.6% win rate)
+      Losing trades: 4
+      Avoided losses: 57 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000029
+      Std dev: 0.000418
+      Min/Max: -0.002063 / 0.002014
+      Long positions: 11
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: -1.04 | WinRate: 50.0%
+  → AUC: 0.6191 | AUCPR: 0.5806 | Accuracy: 0.6083 (0.5333 w/ threshold)
+  → Sharpe: 2.1455 (-1.9016 w/ threshold) | Max DD: -0.0021
+   Skipping visualizations (mode=none)
+
+Configured folds: 6 | Executed valid folds: 5 | Skipped: 1
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  net_return  net_sharpe  turnover  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  trade_coverage  n_long_signals_raw  n_long_signals_post_filters  ev_mean_fold  filter_threshold_rejected  filter_percentile_rejected  filter_technical_rejected  filter_regime_gate_rejected  filter_confidence_rejected  filter_threshold_relaxed  calibration_enabled calibration_method calibration_reason  calibration_error    brier
+    2 0.315917 0.559095  0.325000              0.325000  0.576209     -0.054751           -0.192447   0.423077 0.142857 0.213592           0.64             NaN           sharpe                 True           0.000091   -0.024909   -0.705307 10.000000       0.500000           26                     26                  0.216667        0.216667                  58                           26      0.037757                         62                           5                         15                           12                           0                         0                 True            sigmoid                 ok           0.016890 0.230218
+    3 0.429008 0.454674  0.458333              0.425000  1.380417     -0.032274            0.964373   0.346154 0.147541 0.206896           0.64             NaN           sharpe                 True           0.052416    0.027416    0.403700 10.000000       0.461538           26                     26                  0.216667        0.216667                  56                           26      0.031817                         64                           9                         13                            8                           0                         0                 True            sigmoid                 ok           0.041608 0.251634
+    4 0.829583 0.804868  0.758333              0.575000  1.347588     -0.019328            0.447841   0.736842 0.233333 0.354430           0.64             NaN           sharpe                 True           0.018099   -0.010953   -1.067697 11.620610       0.631579           19                     15                  0.125000        0.158333                  59                           19      0.025976                         61                          25                         15                            0                           0                         0                 True            sigmoid                 ok           0.037303 0.251316
+    5 0.548148 0.404345  0.533333              0.616667 -0.346917     -0.035645           -0.001428   0.454545 0.111111 0.178571           0.64             NaN           sharpe                 True           0.009485   -0.006035   -0.571636  6.208242       0.454545           11                     11                  0.091667        0.091667                  53                           11      0.047787                         67                           9                         33                            0                           0                         0                 True            sigmoid                 ok           0.185508 0.272007
+    6 0.619061 0.580615  0.608333              0.533333  2.145460     -0.002063           -1.901587   0.636364 0.118644 0.200000           0.64             NaN           sharpe                 True           0.003516   -0.000697   -3.218920  1.685192       0.545455           11                     18                  0.150000        0.091667                  54                           11      0.012790                         66                          36                          7                            0                           0                         0                 True            sigmoid                 ok           0.141532 0.269932
+
+--- SKIPPED FOLDS REPORT ---
+Fold 1: insufficient_trades
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5483 ± 0.1952
+AUCPR:                0.5607 ± 0.1547
+Accuracy:             0.5367 ± 0.1622
+Accuracy (threshold): 0.4950 ± 0.1188
+Sharpe Ratio:         1.0206 ± 0.9446
+Sharpe (threshold):   -0.1366 ± 1.0829
+Net Sharpe:           -1.0320 ± 1.3383
+Net Return:           -0.0030 ± 0.0193
+Turnover:             7.9028 ± 4.0046
+Trade Coverage:       0.1550 ± 0.0625
+EV Mean/Fold:         0.03123 ± 0.01308
+Coverage Ratio:       0.8333
+Max Drawdown:         -0.0288 ± 0.0196
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 27 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:  27                                    ║
+║ Best AUC: 0.6764                              ║
+║ Best Accuracy: 0.5611                      ║
+║ Best Sharpe Ratio: 1.4444                  ║
+║ Best Net Sharpe: 0.4134                   ║
+║                                                            ║
+║ Average AUC: 0.5601                         ║
+║ Average Accuracy: 0.5356                 ║
+║ Average Sharpe Ratio: 0.7853             ║
+║                                                            ║
+║ AUC Variance: 0.000918                      ║
+║ Accuracy Variance: 0.000160             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+          feature  importance
+    lstm_latent_6    0.145091
+    lstm_latent_3    0.108392
+             macd    0.076224
+distance_to_ma200    0.072952
+            macds    0.067990
+           ADX_14    0.063898
+   price_to_sma20    0.062133
+         ema_long    0.049014
+    volatility_20    0.047667
+              mfi    0.041053
+        ema_short    0.039507
+           roc_20    0.033020
+  close_vix_ratio    0.031890
+              atr    0.030286
+     lstm_dir_20d    0.030207
+
+⚠️ Features with <1% importance (6 total):
+   lstm_latent_5, lstm_latent_7, lstm_dir_10d, lstm_latent_1, lstm_latent_4, lstm_dir_5d...
+   💡 Consider removing these in future runs for better performance
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    🔮 FINAL ENSEMBLE RECOMMENDATION - MSFT                                                     │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│  Ensemble Statistics:                                                                                                                          │
+│    • Number of Models: 5                                                                                                                       │
+│    • Average Probability: 60.8%                                                                                                                │
+│    • Max Probability: 63.7%                                                                                                                    │
+│    • Min Probability: 59.4%                                                                                                                    │
+│    • Confidence (Spread): 4.3% (High consensus)                                                                                                │
+│                                                                                                                                                │
+│                                                                                                                                                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────── 🎯 TRADING RECOMMENDATION ───────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│   Valid from: 2026-02-27                                                                                                                       │
+│                                                                                                                                                │
+│   Entry Point:                                                                                                                                 │
+│     💰 Price: $392.74                                                                                                                          │
+│                                                                                                                                                │
+│   Target Levels:                                                                                                                               │
+│     🎯 Profit Target: $420.27 (+7.01%)                                                                                                         │
+│     🛑 Stop Loss:     $378.97 (-3.50%)                                                                                                         │
+│                                                                                                                                                │
+│   Dynamic Risk Config:                                                                                                                         │
+│   {                                                                                                                                            │
+│     "dynamic_risk": {                                                                                                                          │
+│       "type": "Volatility_Adjusted",                                                                                                           │
+│       "params": {                                                                                                                              │
+│         "k_tp": 2.5,                                                                                                                           │
+│         "k_sl": 1.25,                                                                                                                          │
+│         "vol_metric": "rolling_std_20d"                                                                                                        │
+│       }                                                                                                                                        │
+│     }                                                                                                                                          │
+│   }                                                                                                                                            │
+│                                                                                                                                                │
+│   Forecast:                                                                                                                                    │
+│     📊 Win Probability: 60.8%                                                                                                                  │
+│                                                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│     RECOMMENDATION: HOLD / WAIT                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│                                                                                                                                                │
+╰─────────────────────────────────────────────────────────── Signal not clear enough ────────────────────────────────────────────────────────────╯
+
+Recommendation payload:
+{
+  "entry": 392.739990234375,
+  "profit_target": 420.270839075018,
+  "stop_loss": 378.9745658140535,
+  "probability": 0.6080614686012268,
+  "dynamic_risk": {
+    "type": "Volatility_Adjusted",
+    "params": {
+      "k_tp": 2.5,
+      "k_sl": 1.25,
+      "vol_metric": "rolling_std_20d"
+    }
+  }
+}
+
+   🧭 Decision state: WATCHLIST | EV=0.02639 | Quality=0.108 | reason=below_dynamic_threshold
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline execution completed successfully!                                                                                                 │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline finished.                                                                                                                         │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+📊 Feature engineering summary:
+   • Requested seed features: 32
+   • Available from seed: 25
+   • Correlation-based drops: 16
+   • Low-importance drops: 8
+   • Final contract features: 25
+
+👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only | mode=full | plots=none
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 6 sliding window splits
+
+--- Fold 1/6 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-09-15 (400 samples)
+Valid: 2022-09-16 to 2023-03-29 (120 samples)
+Class distribution in validation: {1.0: 64, 0.0: 56}
+   ✅ Positions opened: 1/120 (0.8%)
+   🔎 Filter rejections: threshold=78 | percentile=29 | technical=12 | regime_gate=0 | threshold_relaxed=1
+   📏 Position sizing: sized=1/1 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.505
+
+   📊 Backtest Results (Validation Period):
+      Period: 2022-09-16 to 2023-03-29
+      Winning trades: 1/1 (100.0% win rate)
+      Avoided losses: 56 (correctly predicted losers)
+⚠️ Fold 1: Skipped from aggregate metrics - insufficient trades (1 < 3)
+
+--- Fold 2/6 (TimeSeriesSplit) ---
+Train: 2021-06-18 to 2023-03-29 (400 samples)
+Valid: 2023-03-30 to 2023-10-10 (120 samples)
+Class distribution in validation: {1.0: 77, 0.0: 43}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=62 | percentile=5 | technical=15 | regime_gate=12 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-03-30 to 2023-10-10
+      Winning trades: 11/26 (42.3% win rate)
+      Losing trades: 15
+      Avoided losses: 28 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000001
+      Std dev: 0.006484
+      Min/Max: -0.023977 / 0.039800
+      Long positions: 26
+  → AUC: 0.3159 | AUCPR: 0.5591 | Accuracy: 0.3250 (0.3250 w/ threshold)
+  → Sharpe: 0.5762 (-0.1924 w/ threshold) | Max DD: -0.0548
+   Skipping visualizations (mode=none)
+
+--- Fold 3/6 (TimeSeriesSplit) ---
+Train: 2022-01-11 to 2023-10-10 (400 samples)
+Valid: 2023-10-11 to 2024-05-16 (120 samples)
+Class distribution in validation: {1.0: 61, 0.0: 59}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=64 | percentile=9 | technical=13 | regime_gate=8 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-10-11 to 2024-05-16
+      Winning trades: 9/26 (34.6% win rate)
+      Losing trades: 17
+      Avoided losses: 42 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000437
+      Std dev: 0.005884
+      Min/Max: -0.029572 / 0.026600
+      Long positions: 26
+  → AUC: 0.4290 | AUCPR: 0.4547 | Accuracy: 0.4583 (0.4250 w/ threshold)
+  → Sharpe: 1.3804 (0.9644 w/ threshold) | Max DD: -0.0323
+   Skipping visualizations (mode=none)
+
+--- Fold 4/6 (TimeSeriesSplit) ---
+Train: 2022-07-21 to 2024-05-16 (400 samples)
+Valid: 2024-05-17 to 2024-11-26 (120 samples)
+Class distribution in validation: {0.0: 60, 1.0: 60}
+   ✅ Positions opened: 19/120 (15.8%)
+   🔎 Filter rejections: threshold=61 | percentile=25 | technical=15 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=19/19 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.683
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-05-17 to 2024-11-26
+      Winning trades: 14/19 (73.7% win rate)
+      Losing trades: 5
+      Avoided losses: 55 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000151
+      Std dev: 0.002533
+      Min/Max: -0.019014 / 0.008543
+      Long positions: 19
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: 1.25 | WinRate: 60.0%
+  → AUC: 0.8296 | AUCPR: 0.8049 | Accuracy: 0.7583 (0.5750 w/ threshold)
+  → Sharpe: 1.3476 (0.4478 w/ threshold) | Max DD: -0.0193
+   Skipping visualizations (mode=none)
+
+--- Fold 5/6 (TimeSeriesSplit) ---
+Train: 2023-01-20 to 2024-11-26 (400 samples)
+Valid: 2024-11-27 to 2025-06-17 (120 samples)
+Class distribution in validation: {0.0: 75, 1.0: 45}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=67 | percentile=9 | technical=33 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.776
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-11-27 to 2025-06-17
+      Winning trades: 5/11 (45.5% win rate)
+      Losing trades: 6
+      Avoided losses: 69 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000079
+      Std dev: 0.003571
+      Min/Max: -0.013426 / 0.032055
+      Long positions: 11
+  → AUC: 0.5481 | AUCPR: 0.4043 | Accuracy: 0.5333 (0.6167 w/ threshold)
+  → Sharpe: -0.3469 (-0.0014 w/ threshold) | Max DD: -0.0356
+   Skipping visualizations (mode=none)
+
+--- Fold 6/6 (TimeSeriesSplit) ---
+Train: 2023-08-07 to 2025-06-17 (400 samples)
+Valid: 2025-06-18 to 2026-01-12 (120 samples)
+Class distribution in validation: {0.0: 61, 1.0: 59}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=66 | percentile=36 | technical=7 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.169
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-06-18 to 2026-01-12
+      Winning trades: 7/11 (63.6% win rate)
+      Losing trades: 4
+      Avoided losses: 57 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000029
+      Std dev: 0.000418
+      Min/Max: -0.002063 / 0.002014
+      Long positions: 11
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: -1.04 | WinRate: 50.0%
+  → AUC: 0.6191 | AUCPR: 0.5806 | Accuracy: 0.6083 (0.5333 w/ threshold)
+  → Sharpe: 2.1455 (-1.9016 w/ threshold) | Max DD: -0.0021
+   Skipping visualizations (mode=none)
+
+Configured folds: 6 | Executed valid folds: 5 | Skipped: 1
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  net_return  net_sharpe  turnover  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  trade_coverage  n_long_signals_raw  n_long_signals_post_filters  ev_mean_fold  filter_threshold_rejected  filter_percentile_rejected  filter_technical_rejected  filter_regime_gate_rejected  filter_confidence_rejected  filter_threshold_relaxed  calibration_enabled calibration_method calibration_reason  calibration_error    brier
+    2 0.315917 0.559095  0.325000              0.325000  0.576209     -0.054751           -0.192447   0.423077 0.142857 0.213592           0.64             NaN           sharpe                 True           0.000091   -0.024909   -0.705307 10.000000       0.500000           26                     26                  0.216667        0.216667                  58                           26      0.037757                         62                           5                         15                           12                           0                         0                 True            sigmoid                 ok           0.016890 0.230218
+    3 0.429008 0.454674  0.458333              0.425000  1.380417     -0.032274            0.964373   0.346154 0.147541 0.206896           0.64             NaN           sharpe                 True           0.052416    0.027416    0.403700 10.000000       0.461538           26                     26                  0.216667        0.216667                  56                           26      0.031817                         64                           9                         13                            8                           0                         0                 True            sigmoid                 ok           0.041608 0.251634
+    4 0.829583 0.804868  0.758333              0.575000  1.347588     -0.019328            0.447841   0.736842 0.233333 0.354430           0.64             NaN           sharpe                 True           0.018099   -0.010953   -1.067697 11.620610       0.631579           19                     15                  0.125000        0.158333                  59                           19      0.025976                         61                          25                         15                            0                           0                         0                 True            sigmoid                 ok           0.037303 0.251316
+    5 0.548148 0.404345  0.533333              0.616667 -0.346917     -0.035645           -0.001428   0.454545 0.111111 0.178571           0.64             NaN           sharpe                 True           0.009485   -0.006035   -0.571636  6.208242       0.454545           11                     11                  0.091667        0.091667                  53                           11      0.047787                         67                           9                         33                            0                           0                         0                 True            sigmoid                 ok           0.185508 0.272007
+    6 0.619061 0.580615  0.608333              0.533333  2.145460     -0.002063           -1.901587   0.636364 0.118644 0.200000           0.64             NaN           sharpe                 True           0.003516   -0.000697   -3.218920  1.685192       0.545455           11                     18                  0.150000        0.091667                  54                           11      0.012790                         66                          36                          7                            0                           0                         0                 True            sigmoid                 ok           0.141532 0.269932
+
+--- SKIPPED FOLDS REPORT ---
+Fold 1: insufficient_trades
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5483 ± 0.1952
+AUCPR:                0.5607 ± 0.1547
+Accuracy:             0.5367 ± 0.1622
+Accuracy (threshold): 0.4950 ± 0.1188
+Sharpe Ratio:         1.0206 ± 0.9446
+Sharpe (threshold):   -0.1366 ± 1.0829
+Net Sharpe:           -1.0320 ± 1.3383
+Net Return:           -0.0030 ± 0.0193
+Turnover:             7.9028 ± 4.0046
+Trade Coverage:       0.1550 ± 0.0625
+EV Mean/Fold:         0.03123 ± 0.01308
+Coverage Ratio:       0.8333
+Max Drawdown:         -0.0288 ± 0.0196
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 28 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:  28                                    ║
+║ Best AUC: 0.6764                              ║
+║ Best Accuracy: 0.5611                      ║
+║ Best Sharpe Ratio: 1.4444                  ║
+║ Best Net Sharpe: 0.4134                   ║
+║                                                            ║
+║ Average AUC: 0.5597                         ║
+║ Average Accuracy: 0.5356                 ║
+║ Average Sharpe Ratio: 0.7937             ║
+║                                                            ║
+║ AUC Variance: 0.000890                      ║
+║ Accuracy Variance: 0.000154             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+          feature  importance
+    lstm_latent_6    0.145091
+    lstm_latent_3    0.108392
+             macd    0.076224
+distance_to_ma200    0.072952
+            macds    0.067990
+           ADX_14    0.063898
+   price_to_sma20    0.062133
+         ema_long    0.049014
+    volatility_20    0.047667
+              mfi    0.041053
+        ema_short    0.039507
+           roc_20    0.033020
+  close_vix_ratio    0.031890
+              atr    0.030286
+     lstm_dir_20d    0.030207
+
+⚠️ Features with <1% importance (6 total):
+   lstm_latent_5, lstm_latent_7, lstm_dir_10d, lstm_latent_1, lstm_latent_4, lstm_dir_5d...
+   💡 Consider removing these in future runs for better performance
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    🔮 FINAL ENSEMBLE RECOMMENDATION - MSFT                                                     │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│  Ensemble Statistics:                                                                                                                          │
+│    • Number of Models: 5                                                                                                                       │
+│    • Average Probability: 60.8%                                                                                                                │
+│    • Max Probability: 63.7%                                                                                                                    │
+│    • Min Probability: 59.4%                                                                                                                    │
+│    • Confidence (Spread): 4.3% (High consensus)                                                                                                │
+│                                                                                                                                                │
+│                                                                                                                                                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────── 🎯 TRADING RECOMMENDATION ───────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│   Valid from: 2026-02-27                                                                                                                       │
+│                                                                                                                                                │
+│   Entry Point:                                                                                                                                 │
+│     💰 Price: $392.74                                                                                                                          │
+│                                                                                                                                                │
+│   Target Levels:                                                                                                                               │
+│     🎯 Profit Target: $420.27 (+7.01%)                                                                                                         │
+│     🛑 Stop Loss:     $378.97 (-3.50%)                                                                                                         │
+│                                                                                                                                                │
+│   Dynamic Risk Config:                                                                                                                         │
+│   {                                                                                                                                            │
+│     "dynamic_risk": {                                                                                                                          │
+│       "type": "Volatility_Adjusted",                                                                                                           │
+│       "params": {                                                                                                                              │
+│         "k_tp": 2.5,                                                                                                                           │
+│         "k_sl": 1.25,                                                                                                                          │
+│         "vol_metric": "rolling_std_20d"                                                                                                        │
+│       }                                                                                                                                        │
+│     }                                                                                                                                          │
+│   }                                                                                                                                            │
+│                                                                                                                                                │
+│   Forecast:                                                                                                                                    │
+│     📊 Win Probability: 60.8%                                                                                                                  │
+│                                                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│     RECOMMENDATION: HOLD / WAIT                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│                                                                                                                                                │
+╰─────────────────────────────────────────────────────────── Signal not clear enough ────────────────────────────────────────────────────────────╯
+
+Recommendation payload:
+{
+  "entry": 392.739990234375,
+  "profit_target": 420.270839075018,
+  "stop_loss": 378.9745658140535,
+  "probability": 0.6080614686012268,
+  "dynamic_risk": {
+    "type": "Volatility_Adjusted",
+    "params": {
+      "k_tp": 2.5,
+      "k_sl": 1.25,
+      "vol_metric": "rolling_std_20d"
+    }
+  }
+}
+
+   🧭 Decision state: WATCHLIST | EV=0.02639 | Quality=0.108 | reason=below_dynamic_threshold
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline execution completed successfully!                                                                                                 │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline finished.                                                                                                                         │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+📊 Feature engineering summary:
+   • Requested seed features: 32
+   • Available from seed: 25
+   • Correlation-based drops: 16
+   • Low-importance drops: 8
+   • Final contract features: 25
+
+👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only | mode=full | plots=none
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 6 sliding window splits
+
+--- Fold 1/6 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-09-15 (400 samples)
+Valid: 2022-09-16 to 2023-03-29 (120 samples)
+Class distribution in validation: {1.0: 64, 0.0: 56}
+   ✅ Positions opened: 1/120 (0.8%)
+   🔎 Filter rejections: threshold=78 | percentile=29 | technical=12 | regime_gate=0 | threshold_relaxed=1
+   📏 Position sizing: sized=1/1 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.505
+
+   📊 Backtest Results (Validation Period):
+      Period: 2022-09-16 to 2023-03-29
+      Winning trades: 1/1 (100.0% win rate)
+      Avoided losses: 56 (correctly predicted losers)
+⚠️ Fold 1: Skipped from aggregate metrics - insufficient trades (1 < 3)
+
+--- Fold 2/6 (TimeSeriesSplit) ---
+Train: 2021-06-18 to 2023-03-29 (400 samples)
+Valid: 2023-03-30 to 2023-10-10 (120 samples)
+Class distribution in validation: {1.0: 77, 0.0: 43}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=62 | percentile=5 | technical=15 | regime_gate=12 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-03-30 to 2023-10-10
+      Winning trades: 11/26 (42.3% win rate)
+      Losing trades: 15
+      Avoided losses: 28 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000001
+      Std dev: 0.006484
+      Min/Max: -0.023977 / 0.039800
+      Long positions: 26
+  → AUC: 0.3159 | AUCPR: 0.5591 | Accuracy: 0.3250 (0.3250 w/ threshold)
+  → Sharpe: 0.5762 (-0.1924 w/ threshold) | Max DD: -0.0548
+   Skipping visualizations (mode=none)
+
+--- Fold 3/6 (TimeSeriesSplit) ---
+Train: 2022-01-11 to 2023-10-10 (400 samples)
+Valid: 2023-10-11 to 2024-05-16 (120 samples)
+Class distribution in validation: {1.0: 61, 0.0: 59}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=64 | percentile=9 | technical=13 | regime_gate=8 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-10-11 to 2024-05-16
+      Winning trades: 9/26 (34.6% win rate)
+      Losing trades: 17
+      Avoided losses: 42 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000437
+      Std dev: 0.005884
+      Min/Max: -0.029572 / 0.026600
+      Long positions: 26
+  → AUC: 0.4290 | AUCPR: 0.4547 | Accuracy: 0.4583 (0.4250 w/ threshold)
+  → Sharpe: 1.3804 (0.9644 w/ threshold) | Max DD: -0.0323
+   Skipping visualizations (mode=none)
+
+--- Fold 4/6 (TimeSeriesSplit) ---
+Train: 2022-07-21 to 2024-05-16 (400 samples)
+Valid: 2024-05-17 to 2024-11-26 (120 samples)
+Class distribution in validation: {0.0: 60, 1.0: 60}
+   ✅ Positions opened: 19/120 (15.8%)
+   🔎 Filter rejections: threshold=61 | percentile=25 | technical=15 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=19/19 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.683
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-05-17 to 2024-11-26
+      Winning trades: 14/19 (73.7% win rate)
+      Losing trades: 5
+      Avoided losses: 55 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000151
+      Std dev: 0.002533
+      Min/Max: -0.019014 / 0.008543
+      Long positions: 19
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: 1.25 | WinRate: 60.0%
+  → AUC: 0.8296 | AUCPR: 0.8049 | Accuracy: 0.7583 (0.5750 w/ threshold)
+  → Sharpe: 1.3476 (0.4478 w/ threshold) | Max DD: -0.0193
+   Skipping visualizations (mode=none)
+
+--- Fold 5/6 (TimeSeriesSplit) ---
+Train: 2023-01-20 to 2024-11-26 (400 samples)
+Valid: 2024-11-27 to 2025-06-17 (120 samples)
+Class distribution in validation: {0.0: 75, 1.0: 45}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=67 | percentile=9 | technical=33 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.776
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-11-27 to 2025-06-17
+      Winning trades: 5/11 (45.5% win rate)
+      Losing trades: 6
+      Avoided losses: 69 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000079
+      Std dev: 0.003571
+      Min/Max: -0.013426 / 0.032055
+      Long positions: 11
+  → AUC: 0.5481 | AUCPR: 0.4043 | Accuracy: 0.5333 (0.6167 w/ threshold)
+  → Sharpe: -0.3469 (-0.0014 w/ threshold) | Max DD: -0.0356
+   Skipping visualizations (mode=none)
+
+--- Fold 6/6 (TimeSeriesSplit) ---
+Train: 2023-08-07 to 2025-06-17 (400 samples)
+Valid: 2025-06-18 to 2026-01-12 (120 samples)
+Class distribution in validation: {0.0: 61, 1.0: 59}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=66 | percentile=36 | technical=7 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.169
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-06-18 to 2026-01-12
+      Winning trades: 7/11 (63.6% win rate)
+      Losing trades: 4
+      Avoided losses: 57 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000029
+      Std dev: 0.000418
+      Min/Max: -0.002063 / 0.002014
+      Long positions: 11
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: -1.04 | WinRate: 50.0%
+  → AUC: 0.6191 | AUCPR: 0.5806 | Accuracy: 0.6083 (0.5333 w/ threshold)
+  → Sharpe: 2.1455 (-1.9016 w/ threshold) | Max DD: -0.0021
+   Skipping visualizations (mode=none)
+
+Configured folds: 6 | Executed valid folds: 5 | Skipped: 1
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  net_return  net_sharpe  turnover  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  trade_coverage  n_long_signals_raw  n_long_signals_post_filters  ev_mean_fold  filter_threshold_rejected  filter_percentile_rejected  filter_technical_rejected  filter_regime_gate_rejected  filter_confidence_rejected  filter_threshold_relaxed  calibration_enabled calibration_method calibration_reason  calibration_error    brier
+    2 0.315917 0.559095  0.325000              0.325000  0.576209     -0.054751           -0.192447   0.423077 0.142857 0.213592           0.64             NaN           sharpe                 True           0.000091   -0.024909   -0.705307 10.000000       0.500000           26                     26                  0.216667        0.216667                  58                           26      0.037757                         62                           5                         15                           12                           0                         0                 True            sigmoid                 ok           0.016890 0.230218
+    3 0.429008 0.454674  0.458333              0.425000  1.380417     -0.032274            0.964373   0.346154 0.147541 0.206896           0.64             NaN           sharpe                 True           0.052416    0.027416    0.403700 10.000000       0.461538           26                     26                  0.216667        0.216667                  56                           26      0.031817                         64                           9                         13                            8                           0                         0                 True            sigmoid                 ok           0.041608 0.251634
+    4 0.829583 0.804868  0.758333              0.575000  1.347588     -0.019328            0.447841   0.736842 0.233333 0.354430           0.64             NaN           sharpe                 True           0.018099   -0.010953   -1.067697 11.620610       0.631579           19                     15                  0.125000        0.158333                  59                           19      0.025976                         61                          25                         15                            0                           0                         0                 True            sigmoid                 ok           0.037303 0.251316
+    5 0.548148 0.404345  0.533333              0.616667 -0.346917     -0.035645           -0.001428   0.454545 0.111111 0.178571           0.64             NaN           sharpe                 True           0.009485   -0.006035   -0.571636  6.208242       0.454545           11                     11                  0.091667        0.091667                  53                           11      0.047787                         67                           9                         33                            0                           0                         0                 True            sigmoid                 ok           0.185508 0.272007
+    6 0.619061 0.580615  0.608333              0.533333  2.145460     -0.002063           -1.901587   0.636364 0.118644 0.200000           0.64             NaN           sharpe                 True           0.003516   -0.000697   -3.218920  1.685192       0.545455           11                     18                  0.150000        0.091667                  54                           11      0.012790                         66                          36                          7                            0                           0                         0                 True            sigmoid                 ok           0.141532 0.269932
+
+--- SKIPPED FOLDS REPORT ---
+Fold 1: insufficient_trades
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5483 ± 0.1952
+AUCPR:                0.5607 ± 0.1547
+Accuracy:             0.5367 ± 0.1622
+Accuracy (threshold): 0.4950 ± 0.1188
+Sharpe Ratio:         1.0206 ± 0.9446
+Sharpe (threshold):   -0.1366 ± 1.0829
+Net Sharpe:           -1.0320 ± 1.3383
+Net Return:           -0.0030 ± 0.0193
+Turnover:             7.9028 ± 4.0046
+Trade Coverage:       0.1550 ± 0.0625
+EV Mean/Fold:         0.03123 ± 0.01308
+Coverage Ratio:       0.8333
+Max Drawdown:         -0.0288 ± 0.0196
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 29 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:  29                                    ║
+║ Best AUC: 0.6764                              ║
+║ Best Accuracy: 0.5611                      ║
+║ Best Sharpe Ratio: 1.4444                  ║
+║ Best Net Sharpe: 0.4134                   ║
+║                                                            ║
+║ Average AUC: 0.5593                         ║
+║ Average Accuracy: 0.5357                 ║
+║ Average Sharpe Ratio: 0.8016             ║
+║                                                            ║
+║ AUC Variance: 0.000864                      ║
+║ Accuracy Variance: 0.000149             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+          feature  importance
+    lstm_latent_6    0.145091
+    lstm_latent_3    0.108392
+             macd    0.076224
+distance_to_ma200    0.072952
+            macds    0.067990
+           ADX_14    0.063898
+   price_to_sma20    0.062133
+         ema_long    0.049014
+    volatility_20    0.047667
+              mfi    0.041053
+        ema_short    0.039507
+           roc_20    0.033020
+  close_vix_ratio    0.031890
+              atr    0.030286
+     lstm_dir_20d    0.030207
+
+⚠️ Features with <1% importance (6 total):
+   lstm_latent_5, lstm_latent_7, lstm_dir_10d, lstm_latent_1, lstm_latent_4, lstm_dir_5d...
+   💡 Consider removing these in future runs for better performance
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    🔮 FINAL ENSEMBLE RECOMMENDATION - MSFT                                                     │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│  Ensemble Statistics:                                                                                                                          │
+│    • Number of Models: 5                                                                                                                       │
+│    • Average Probability: 60.8%                                                                                                                │
+│    • Max Probability: 63.7%                                                                                                                    │
+│    • Min Probability: 59.4%                                                                                                                    │
+│    • Confidence (Spread): 4.3% (High consensus)                                                                                                │
+│                                                                                                                                                │
+│                                                                                                                                                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────── 🎯 TRADING RECOMMENDATION ───────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│   Valid from: 2026-02-27                                                                                                                       │
+│                                                                                                                                                │
+│   Entry Point:                                                                                                                                 │
+│     💰 Price: $392.74                                                                                                                          │
+│                                                                                                                                                │
+│   Target Levels:                                                                                                                               │
+│     🎯 Profit Target: $420.27 (+7.01%)                                                                                                         │
+│     🛑 Stop Loss:     $378.97 (-3.50%)                                                                                                         │
+│                                                                                                                                                │
+│   Dynamic Risk Config:                                                                                                                         │
+│   {                                                                                                                                            │
+│     "dynamic_risk": {                                                                                                                          │
+│       "type": "Volatility_Adjusted",                                                                                                           │
+│       "params": {                                                                                                                              │
+│         "k_tp": 2.5,                                                                                                                           │
+│         "k_sl": 1.25,                                                                                                                          │
+│         "vol_metric": "rolling_std_20d"                                                                                                        │
+│       }                                                                                                                                        │
+│     }                                                                                                                                          │
+│   }                                                                                                                                            │
+│                                                                                                                                                │
+│   Forecast:                                                                                                                                    │
+│     📊 Win Probability: 60.8%                                                                                                                  │
+│                                                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│     RECOMMENDATION: HOLD / WAIT                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│                                                                                                                                                │
+╰─────────────────────────────────────────────────────────── Signal not clear enough ────────────────────────────────────────────────────────────╯
+
+Recommendation payload:
+{
+  "entry": 392.739990234375,
+  "profit_target": 420.270839075018,
+  "stop_loss": 378.9745658140535,
+  "probability": 0.6080614686012268,
+  "dynamic_risk": {
+    "type": "Volatility_Adjusted",
+    "params": {
+      "k_tp": 2.5,
+      "k_sl": 1.25,
+      "vol_metric": "rolling_std_20d"
+    }
+  }
+}
+
+   🧭 Decision state: WATCHLIST | EV=0.02639 | Quality=0.108 | reason=below_dynamic_threshold
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline execution completed successfully!                                                                                                 │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline finished.                                                                                                                         │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+📊 Feature engineering summary:
+   • Requested seed features: 32
+   • Available from seed: 25
+   • Correlation-based drops: 16
+   • Low-importance drops: 8
+   • Final contract features: 25
+
+👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only | mode=full | plots=none
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 6 sliding window splits
+
+--- Fold 1/6 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-09-15 (400 samples)
+Valid: 2022-09-16 to 2023-03-29 (120 samples)
+Class distribution in validation: {1.0: 64, 0.0: 56}
+   ✅ Positions opened: 1/120 (0.8%)
+   🔎 Filter rejections: threshold=78 | percentile=29 | technical=12 | regime_gate=0 | threshold_relaxed=1
+   📏 Position sizing: sized=1/1 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.505
+
+   📊 Backtest Results (Validation Period):
+      Period: 2022-09-16 to 2023-03-29
+      Winning trades: 1/1 (100.0% win rate)
+      Avoided losses: 56 (correctly predicted losers)
+⚠️ Fold 1: Skipped from aggregate metrics - insufficient trades (1 < 3)
+
+--- Fold 2/6 (TimeSeriesSplit) ---
+Train: 2021-06-18 to 2023-03-29 (400 samples)
+Valid: 2023-03-30 to 2023-10-10 (120 samples)
+Class distribution in validation: {1.0: 77, 0.0: 43}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=62 | percentile=5 | technical=15 | regime_gate=12 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-03-30 to 2023-10-10
+      Winning trades: 11/26 (42.3% win rate)
+      Losing trades: 15
+      Avoided losses: 28 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000001
+      Std dev: 0.006484
+      Min/Max: -0.023977 / 0.039800
+      Long positions: 26
+  → AUC: 0.3159 | AUCPR: 0.5591 | Accuracy: 0.3250 (0.3250 w/ threshold)
+  → Sharpe: 0.5762 (-0.1924 w/ threshold) | Max DD: -0.0548
+   Skipping visualizations (mode=none)
+
+--- Fold 3/6 (TimeSeriesSplit) ---
+Train: 2022-01-11 to 2023-10-10 (400 samples)
+Valid: 2023-10-11 to 2024-05-16 (120 samples)
+Class distribution in validation: {1.0: 61, 0.0: 59}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=64 | percentile=9 | technical=13 | regime_gate=8 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-10-11 to 2024-05-16
+      Winning trades: 9/26 (34.6% win rate)
+      Losing trades: 17
+      Avoided losses: 42 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000437
+      Std dev: 0.005884
+      Min/Max: -0.029572 / 0.026600
+      Long positions: 26
+  → AUC: 0.4290 | AUCPR: 0.4547 | Accuracy: 0.4583 (0.4250 w/ threshold)
+  → Sharpe: 1.3804 (0.9644 w/ threshold) | Max DD: -0.0323
+   Skipping visualizations (mode=none)
+
+--- Fold 4/6 (TimeSeriesSplit) ---
+Train: 2022-07-21 to 2024-05-16 (400 samples)
+Valid: 2024-05-17 to 2024-11-26 (120 samples)
+Class distribution in validation: {0.0: 60, 1.0: 60}
+   ✅ Positions opened: 19/120 (15.8%)
+   🔎 Filter rejections: threshold=61 | percentile=25 | technical=15 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=19/19 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.683
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-05-17 to 2024-11-26
+      Winning trades: 14/19 (73.7% win rate)
+      Losing trades: 5
+      Avoided losses: 55 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000151
+      Std dev: 0.002533
+      Min/Max: -0.019014 / 0.008543
+      Long positions: 19
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: 1.25 | WinRate: 60.0%
+  → AUC: 0.8296 | AUCPR: 0.8049 | Accuracy: 0.7583 (0.5750 w/ threshold)
+  → Sharpe: 1.3476 (0.4478 w/ threshold) | Max DD: -0.0193
+   Skipping visualizations (mode=none)
+
+--- Fold 5/6 (TimeSeriesSplit) ---
+Train: 2023-01-20 to 2024-11-26 (400 samples)
+Valid: 2024-11-27 to 2025-06-17 (120 samples)
+Class distribution in validation: {0.0: 75, 1.0: 45}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=67 | percentile=9 | technical=33 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.776
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-11-27 to 2025-06-17
+      Winning trades: 5/11 (45.5% win rate)
+      Losing trades: 6
+      Avoided losses: 69 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000079
+      Std dev: 0.003571
+      Min/Max: -0.013426 / 0.032055
+      Long positions: 11
+  → AUC: 0.5481 | AUCPR: 0.4043 | Accuracy: 0.5333 (0.6167 w/ threshold)
+  → Sharpe: -0.3469 (-0.0014 w/ threshold) | Max DD: -0.0356
+   Skipping visualizations (mode=none)
+
+--- Fold 6/6 (TimeSeriesSplit) ---
+Train: 2023-08-07 to 2025-06-17 (400 samples)
+Valid: 2025-06-18 to 2026-01-12 (120 samples)
+Class distribution in validation: {0.0: 61, 1.0: 59}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=66 | percentile=36 | technical=7 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.169
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-06-18 to 2026-01-12
+      Winning trades: 7/11 (63.6% win rate)
+      Losing trades: 4
+      Avoided losses: 57 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000029
+      Std dev: 0.000418
+      Min/Max: -0.002063 / 0.002014
+      Long positions: 11
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: -1.04 | WinRate: 50.0%
+  → AUC: 0.6191 | AUCPR: 0.5806 | Accuracy: 0.6083 (0.5333 w/ threshold)
+  → Sharpe: 2.1455 (-1.9016 w/ threshold) | Max DD: -0.0021
+   Skipping visualizations (mode=none)
+
+Configured folds: 6 | Executed valid folds: 5 | Skipped: 1
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  net_return  net_sharpe  turnover  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  trade_coverage  n_long_signals_raw  n_long_signals_post_filters  ev_mean_fold  filter_threshold_rejected  filter_percentile_rejected  filter_technical_rejected  filter_regime_gate_rejected  filter_confidence_rejected  filter_threshold_relaxed  calibration_enabled calibration_method calibration_reason  calibration_error    brier
+    2 0.315917 0.559095  0.325000              0.325000  0.576209     -0.054751           -0.192447   0.423077 0.142857 0.213592           0.64             NaN           sharpe                 True           0.000091   -0.024909   -0.705307 10.000000       0.500000           26                     26                  0.216667        0.216667                  58                           26      0.037757                         62                           5                         15                           12                           0                         0                 True            sigmoid                 ok           0.016890 0.230218
+    3 0.429008 0.454674  0.458333              0.425000  1.380417     -0.032274            0.964373   0.346154 0.147541 0.206896           0.64             NaN           sharpe                 True           0.052416    0.027416    0.403700 10.000000       0.461538           26                     26                  0.216667        0.216667                  56                           26      0.031817                         64                           9                         13                            8                           0                         0                 True            sigmoid                 ok           0.041608 0.251634
+    4 0.829583 0.804868  0.758333              0.575000  1.347588     -0.019328            0.447841   0.736842 0.233333 0.354430           0.64             NaN           sharpe                 True           0.018099   -0.010953   -1.067697 11.620610       0.631579           19                     15                  0.125000        0.158333                  59                           19      0.025976                         61                          25                         15                            0                           0                         0                 True            sigmoid                 ok           0.037303 0.251316
+    5 0.548148 0.404345  0.533333              0.616667 -0.346917     -0.035645           -0.001428   0.454545 0.111111 0.178571           0.64             NaN           sharpe                 True           0.009485   -0.006035   -0.571636  6.208242       0.454545           11                     11                  0.091667        0.091667                  53                           11      0.047787                         67                           9                         33                            0                           0                         0                 True            sigmoid                 ok           0.185508 0.272007
+    6 0.619061 0.580615  0.608333              0.533333  2.145460     -0.002063           -1.901587   0.636364 0.118644 0.200000           0.64             NaN           sharpe                 True           0.003516   -0.000697   -3.218920  1.685192       0.545455           11                     18                  0.150000        0.091667                  54                           11      0.012790                         66                          36                          7                            0                           0                         0                 True            sigmoid                 ok           0.141532 0.269932
+
+--- SKIPPED FOLDS REPORT ---
+Fold 1: insufficient_trades
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5483 ± 0.1952
+AUCPR:                0.5607 ± 0.1547
+Accuracy:             0.5367 ± 0.1622
+Accuracy (threshold): 0.4950 ± 0.1188
+Sharpe Ratio:         1.0206 ± 0.9446
+Sharpe (threshold):   -0.1366 ± 1.0829
+Net Sharpe:           -1.0320 ± 1.3383
+Net Return:           -0.0030 ± 0.0193
+Turnover:             7.9028 ± 4.0046
+Trade Coverage:       0.1550 ± 0.0625
+EV Mean/Fold:         0.03123 ± 0.01308
+Coverage Ratio:       0.8333
+Max Drawdown:         -0.0288 ± 0.0196
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 30 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:  30                                    ║
+║ Best AUC: 0.6764                              ║
+║ Best Accuracy: 0.5611                      ║
+║ Best Sharpe Ratio: 1.4444                  ║
+║ Best Net Sharpe: 0.4134                   ║
+║                                                            ║
+║ Average AUC: 0.5589                         ║
+║ Average Accuracy: 0.5357                 ║
+║ Average Sharpe Ratio: 0.8089             ║
+║                                                            ║
+║ AUC Variance: 0.000839                      ║
+║ Accuracy Variance: 0.000144             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+          feature  importance
+    lstm_latent_6    0.145091
+    lstm_latent_3    0.108392
+             macd    0.076224
+distance_to_ma200    0.072952
+            macds    0.067990
+           ADX_14    0.063898
+   price_to_sma20    0.062133
+         ema_long    0.049014
+    volatility_20    0.047667
+              mfi    0.041053
+        ema_short    0.039507
+           roc_20    0.033020
+  close_vix_ratio    0.031890
+              atr    0.030286
+     lstm_dir_20d    0.030207
+
+⚠️ Features with <1% importance (6 total):
+   lstm_latent_5, lstm_latent_7, lstm_dir_10d, lstm_latent_1, lstm_latent_4, lstm_dir_5d...
+   💡 Consider removing these in future runs for better performance
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    🔮 FINAL ENSEMBLE RECOMMENDATION - MSFT                                                     │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│  Ensemble Statistics:                                                                                                                          │
+│    • Number of Models: 5                                                                                                                       │
+│    • Average Probability: 60.8%                                                                                                                │
+│    • Max Probability: 63.7%                                                                                                                    │
+│    • Min Probability: 59.4%                                                                                                                    │
+│    • Confidence (Spread): 4.3% (High consensus)                                                                                                │
+│                                                                                                                                                │
+│                                                                                                                                                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────── 🎯 TRADING RECOMMENDATION ───────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│   Valid from: 2026-02-27                                                                                                                       │
+│                                                                                                                                                │
+│   Entry Point:                                                                                                                                 │
+│     💰 Price: $392.74                                                                                                                          │
+│                                                                                                                                                │
+│   Target Levels:                                                                                                                               │
+│     🎯 Profit Target: $420.27 (+7.01%)                                                                                                         │
+│     🛑 Stop Loss:     $378.97 (-3.50%)                                                                                                         │
+│                                                                                                                                                │
+│   Dynamic Risk Config:                                                                                                                         │
+│   {                                                                                                                                            │
+│     "dynamic_risk": {                                                                                                                          │
+│       "type": "Volatility_Adjusted",                                                                                                           │
+│       "params": {                                                                                                                              │
+│         "k_tp": 2.5,                                                                                                                           │
+│         "k_sl": 1.25,                                                                                                                          │
+│         "vol_metric": "rolling_std_20d"                                                                                                        │
+│       }                                                                                                                                        │
+│     }                                                                                                                                          │
+│   }                                                                                                                                            │
+│                                                                                                                                                │
+│   Forecast:                                                                                                                                    │
+│     📊 Win Probability: 60.8%                                                                                                                  │
+│                                                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│     RECOMMENDATION: HOLD / WAIT                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│                                                                                                                                                │
+╰─────────────────────────────────────────────────────────── Signal not clear enough ────────────────────────────────────────────────────────────╯
+
+Recommendation payload:
+{
+  "entry": 392.739990234375,
+  "profit_target": 420.270839075018,
+  "stop_loss": 378.9745658140535,
+  "probability": 0.6080614686012268,
+  "dynamic_risk": {
+    "type": "Volatility_Adjusted",
+    "params": {
+      "k_tp": 2.5,
+      "k_sl": 1.25,
+      "vol_metric": "rolling_std_20d"
+    }
+  }
+}
+
+   🧭 Decision state: WATCHLIST | EV=0.02639 | Quality=0.108 | reason=below_dynamic_threshold
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline execution completed successfully!                                                                                                 │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline finished.                                                                                                                         │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+📊 Feature engineering summary:
+   • Requested seed features: 32
+   • Available from seed: 25
+   • Correlation-based drops: 16
+   • Low-importance drops: 8
+   • Final contract features: 25
+
+👑 --- Launching XGBoost with Time-Series-Aware Cross-Validation --- 👑
+
+--- Starting Time-Series-Aware Model Training ---
+Configured folds: 12 | Min validation size: 60 | Trading mode: long_only | mode=full | plots=none
+✨ Using SLIDING WINDOW strategy (adaptive, not expanding)
+   Train window: 400 days | Test window: 120 days
+   This allows model to adapt faster to market regime changes
+   Generated 6 sliding window splits
+
+--- Fold 1/6 (TimeSeriesSplit) ---
+Train: 2020-12-11 to 2022-09-15 (400 samples)
+Valid: 2022-09-16 to 2023-03-29 (120 samples)
+Class distribution in validation: {1.0: 64, 0.0: 56}
+   ✅ Positions opened: 1/120 (0.8%)
+   🔎 Filter rejections: threshold=78 | percentile=29 | technical=12 | regime_gate=0 | threshold_relaxed=1
+   📏 Position sizing: sized=1/1 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.505
+
+   📊 Backtest Results (Validation Period):
+      Period: 2022-09-16 to 2023-03-29
+      Winning trades: 1/1 (100.0% win rate)
+      Avoided losses: 56 (correctly predicted losers)
+⚠️ Fold 1: Skipped from aggregate metrics - insufficient trades (1 < 3)
+
+--- Fold 2/6 (TimeSeriesSplit) ---
+Train: 2021-06-18 to 2023-03-29 (400 samples)
+Valid: 2023-03-30 to 2023-10-10 (120 samples)
+Class distribution in validation: {1.0: 77, 0.0: 43}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=62 | percentile=5 | technical=15 | regime_gate=12 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-03-30 to 2023-10-10
+      Winning trades: 11/26 (42.3% win rate)
+      Losing trades: 15
+      Avoided losses: 28 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000001
+      Std dev: 0.006484
+      Min/Max: -0.023977 / 0.039800
+      Long positions: 26
+  → AUC: 0.3159 | AUCPR: 0.5591 | Accuracy: 0.3250 (0.3250 w/ threshold)
+  → Sharpe: 0.5762 (-0.1924 w/ threshold) | Max DD: -0.0548
+   Skipping visualizations (mode=none)
+
+--- Fold 3/6 (TimeSeriesSplit) ---
+Train: 2022-01-11 to 2023-10-10 (400 samples)
+Valid: 2023-10-11 to 2024-05-16 (120 samples)
+Class distribution in validation: {1.0: 61, 0.0: 59}
+   ✅ Positions opened: 26/120 (21.7%)
+   🔎 Filter rejections: threshold=64 | percentile=9 | technical=13 | regime_gate=8 | threshold_relaxed=0
+   📏 Position sizing: sized=26/26 | skipped uncertain=0 | skipped low_conf=0 | avg size=1.000
+
+   📊 Backtest Results (Validation Period):
+      Period: 2023-10-11 to 2024-05-16
+      Winning trades: 9/26 (34.6% win rate)
+      Losing trades: 17
+      Avoided losses: 42 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000437
+      Std dev: 0.005884
+      Min/Max: -0.029572 / 0.026600
+      Long positions: 26
+  → AUC: 0.4290 | AUCPR: 0.4547 | Accuracy: 0.4583 (0.4250 w/ threshold)
+  → Sharpe: 1.3804 (0.9644 w/ threshold) | Max DD: -0.0323
+   Skipping visualizations (mode=none)
+
+--- Fold 4/6 (TimeSeriesSplit) ---
+Train: 2022-07-21 to 2024-05-16 (400 samples)
+Valid: 2024-05-17 to 2024-11-26 (120 samples)
+Class distribution in validation: {0.0: 60, 1.0: 60}
+   ✅ Positions opened: 19/120 (15.8%)
+   🔎 Filter rejections: threshold=61 | percentile=25 | technical=15 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=19/19 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.683
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-05-17 to 2024-11-26
+      Winning trades: 14/19 (73.7% win rate)
+      Losing trades: 5
+      Avoided losses: 55 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000151
+      Std dev: 0.002533
+      Min/Max: -0.019014 / 0.008543
+      Long positions: 19
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: 1.25 | WinRate: 60.0%
+  → AUC: 0.8296 | AUCPR: 0.8049 | Accuracy: 0.7583 (0.5750 w/ threshold)
+  → Sharpe: 1.3476 (0.4478 w/ threshold) | Max DD: -0.0193
+   Skipping visualizations (mode=none)
+
+--- Fold 5/6 (TimeSeriesSplit) ---
+Train: 2023-01-20 to 2024-11-26 (400 samples)
+Valid: 2024-11-27 to 2025-06-17 (120 samples)
+Class distribution in validation: {0.0: 75, 1.0: 45}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=67 | percentile=9 | technical=33 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.776
+
+   📊 Backtest Results (Validation Period):
+      Period: 2024-11-27 to 2025-06-17
+      Winning trades: 5/11 (45.5% win rate)
+      Losing trades: 6
+      Avoided losses: 69 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000079
+      Std dev: 0.003571
+      Min/Max: -0.013426 / 0.032055
+      Long positions: 11
+  → AUC: 0.5481 | AUCPR: 0.4043 | Accuracy: 0.5333 (0.6167 w/ threshold)
+  → Sharpe: -0.3469 (-0.0014 w/ threshold) | Max DD: -0.0356
+   Skipping visualizations (mode=none)
+
+--- Fold 6/6 (TimeSeriesSplit) ---
+Train: 2023-08-07 to 2025-06-17 (400 samples)
+Valid: 2025-06-18 to 2026-01-12 (120 samples)
+Class distribution in validation: {0.0: 61, 1.0: 59}
+   ✅ Positions opened: 11/120 (9.2%)
+   🔎 Filter rejections: threshold=66 | percentile=36 | technical=7 | regime_gate=0 | threshold_relaxed=0
+   📏 Position sizing: sized=11/11 | skipped uncertain=0 | skipped low_conf=0 | avg size=0.169
+
+   📊 Backtest Results (Validation Period):
+      Period: 2025-06-18 to 2026-01-12
+      Winning trades: 7/11 (63.6% win rate)
+      Losing trades: 4
+      Avoided losses: 57 (correctly predicted losers)
+   📊 Returns stats (valid days: 120/120):
+      Mean return: 0.000029
+      Std dev: 0.000418
+      Min/Max: -0.002063 / 0.002014
+      Long positions: 11
+  → Threshold (sharpe): BUY=0.6400 | Sharpe: -1.04 | WinRate: 50.0%
+  → AUC: 0.6191 | AUCPR: 0.5806 | Accuracy: 0.6083 (0.5333 w/ threshold)
+  → Sharpe: 2.1455 (-1.9016 w/ threshold) | Max DD: -0.0021
+   Skipping visualizations (mode=none)
+
+Configured folds: 6 | Executed valid folds: 5 | Skipped: 1
+
+================================================================================
+--- CROSS-VALIDATION SUMMARY (Valid Folds) ---
+================================================================================
+ fold      auc    aucpr  accuracy  accuracy_thresholded    sharpe  max_drawdown  sharpe_thresholded  precision   recall       f1  threshold_buy  threshold_sell threshold_metric  adaptive_thresholds  fold_total_return  net_return  net_sharpe  turnover  fold_win_rate  fold_trades  n_trades_at_threshold  trade_ratio_at_threshold  trade_coverage  n_long_signals_raw  n_long_signals_post_filters  ev_mean_fold  filter_threshold_rejected  filter_percentile_rejected  filter_technical_rejected  filter_regime_gate_rejected  filter_confidence_rejected  filter_threshold_relaxed  calibration_enabled calibration_method calibration_reason  calibration_error    brier
+    2 0.315917 0.559095  0.325000              0.325000  0.576209     -0.054751           -0.192447   0.423077 0.142857 0.213592           0.64             NaN           sharpe                 True           0.000091   -0.024909   -0.705307 10.000000       0.500000           26                     26                  0.216667        0.216667                  58                           26      0.037757                         62                           5                         15                           12                           0                         0                 True            sigmoid                 ok           0.016890 0.230218
+    3 0.429008 0.454674  0.458333              0.425000  1.380417     -0.032274            0.964373   0.346154 0.147541 0.206896           0.64             NaN           sharpe                 True           0.052416    0.027416    0.403700 10.000000       0.461538           26                     26                  0.216667        0.216667                  56                           26      0.031817                         64                           9                         13                            8                           0                         0                 True            sigmoid                 ok           0.041608 0.251634
+    4 0.829583 0.804868  0.758333              0.575000  1.347588     -0.019328            0.447841   0.736842 0.233333 0.354430           0.64             NaN           sharpe                 True           0.018099   -0.010953   -1.067697 11.620610       0.631579           19                     15                  0.125000        0.158333                  59                           19      0.025976                         61                          25                         15                            0                           0                         0                 True            sigmoid                 ok           0.037303 0.251316
+    5 0.548148 0.404345  0.533333              0.616667 -0.346917     -0.035645           -0.001428   0.454545 0.111111 0.178571           0.64             NaN           sharpe                 True           0.009485   -0.006035   -0.571636  6.208242       0.454545           11                     11                  0.091667        0.091667                  53                           11      0.047787                         67                           9                         33                            0                           0                         0                 True            sigmoid                 ok           0.185508 0.272007
+    6 0.619061 0.580615  0.608333              0.533333  2.145460     -0.002063           -1.901587   0.636364 0.118644 0.200000           0.64             NaN           sharpe                 True           0.003516   -0.000697   -3.218920  1.685192       0.545455           11                     18                  0.150000        0.091667                  54                           11      0.012790                         66                          36                          7                            0                           0                         0                 True            sigmoid                 ok           0.141532 0.269932
+
+--- SKIPPED FOLDS REPORT ---
+Fold 1: insufficient_trades
+
+--- AGGREGATE STATISTICS ---
+AUC:                  0.5483 ± 0.1952
+AUCPR:                0.5607 ± 0.1547
+Accuracy:             0.5367 ± 0.1622
+Accuracy (threshold): 0.4950 ± 0.1188
+Sharpe Ratio:         1.0206 ± 0.9446
+Sharpe (threshold):   -0.1366 ± 1.0829
+Net Sharpe:           -1.0320 ± 1.3383
+Net Return:           -0.0030 ± 0.0193
+Turnover:             7.9028 ± 4.0046
+Trade Coverage:       0.1550 ± 0.0625
+EV Mean/Fold:         0.03123 ± 0.01308
+Coverage Ratio:       0.8333
+Max Drawdown:         -0.0288 ± 0.0196
+================================================================================
+
+📊 Logging results to accumulative JSON...
+   ✅ Run 31 logged successfully
+
+╔════════════════════════════════════════════════════════════╗
+║        ACCUMULATIVE RUN LOG SUMMARY                        ║
+╠════════════════════════════════════════════════════════════╣
+║ Total Runs:  31                                    ║
+║ Best AUC: 0.6764                              ║
+║ Best Accuracy: 0.5611                      ║
+║ Best Sharpe Ratio: 1.4444                  ║
+║ Best Net Sharpe: 0.4134                   ║
+║                                                            ║
+║ Average AUC: 0.5586                         ║
+║ Average Accuracy: 0.5357                 ║
+║ Average Sharpe Ratio: 0.8157             ║
+║                                                            ║
+║ AUC Variance: 0.000815                      ║
+║ Accuracy Variance: 0.000139             ║
+╚════════════════════════════════════════════════════════════╝
+        
+   ✅ Run summary exported to out/runs_summary.csv
+
+--- Top 15 Feature Importances ---
+          feature  importance
+    lstm_latent_6    0.145091
+    lstm_latent_3    0.108392
+             macd    0.076224
+distance_to_ma200    0.072952
+            macds    0.067990
+           ADX_14    0.063898
+   price_to_sma20    0.062133
+         ema_long    0.049014
+    volatility_20    0.047667
+              mfi    0.041053
+        ema_short    0.039507
+           roc_20    0.033020
+  close_vix_ratio    0.031890
+              atr    0.030286
+     lstm_dir_20d    0.030207
+
+⚠️ Features with <1% importance (6 total):
+   lstm_latent_5, lstm_latent_7, lstm_dir_10d, lstm_latent_1, lstm_latent_4, lstm_dir_5d...
+   💡 Consider removing these in future runs for better performance
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    🔮 FINAL ENSEMBLE RECOMMENDATION - MSFT                                                     │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│  Ensemble Statistics:                                                                                                                          │
+│    • Number of Models: 5                                                                                                                       │
+│    • Average Probability: 60.8%                                                                                                                │
+│    • Max Probability: 63.7%                                                                                                                    │
+│    • Min Probability: 59.4%                                                                                                                    │
+│    • Confidence (Spread): 4.3% (High consensus)                                                                                                │
+│                                                                                                                                                │
+│                                                                                                                                                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────── 🎯 TRADING RECOMMENDATION ───────────────────────────────────────────────────────────╮
+│                                                                                                                                                │
+│   Valid from: 2026-02-27                                                                                                                       │
+│                                                                                                                                                │
+│   Entry Point:                                                                                                                                 │
+│     💰 Price: $392.74                                                                                                                          │
+│                                                                                                                                                │
+│   Target Levels:                                                                                                                               │
+│     🎯 Profit Target: $420.27 (+7.01%)                                                                                                         │
+│     🛑 Stop Loss:     $378.97 (-3.50%)                                                                                                         │
+│                                                                                                                                                │
+│   Dynamic Risk Config:                                                                                                                         │
+│   {                                                                                                                                            │
+│     "dynamic_risk": {                                                                                                                          │
+│       "type": "Volatility_Adjusted",                                                                                                           │
+│       "params": {                                                                                                                              │
+│         "k_tp": 2.5,                                                                                                                           │
+│         "k_sl": 1.25,                                                                                                                          │
+│         "vol_metric": "rolling_std_20d"                                                                                                        │
+│       }                                                                                                                                        │
+│     }                                                                                                                                          │
+│   }                                                                                                                                            │
+│                                                                                                                                                │
+│   Forecast:                                                                                                                                    │
+│     📊 Win Probability: 60.8%                                                                                                                  │
+│                                                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│     RECOMMENDATION: HOLD / WAIT                                                                                                                │
+│   ──────────────────────────────────────────────────                                                                                           │
+│                                                                                                                                                │
+╰─────────────────────────────────────────────────────────── Signal not clear enough ────────────────────────────────────────────────────────────╯
+
+Recommendation payload:
+{
+  "entry": 392.739990234375,
+  "profit_target": 420.270839075018,
+  "stop_loss": 378.9745658140535,
+  "probability": 0.6080614686012268,
+  "dynamic_risk": {
+    "type": "Volatility_Adjusted",
+    "params": {
+      "k_tp": 2.5,
+      "k_sl": 1.25,
+      "vol_metric": "rolling_std_20d"
+    }
+  }
+}
+
+   🧭 Decision state: WATCHLIST | EV=0.02639 | Quality=0.108 | reason=below_dynamic_threshold
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline execution completed successfully!                                                                                                 │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ✅ Pipeline finished.                                                                                                                         │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+seed=42 run=27 score=-0.6821 net_sharpe=-1.0320 coverage=0.8333
+seed=77 run=28 score=-0.6821 net_sharpe=-1.0320 coverage=0.8333
+seed=101 run=29 score=-0.6821 net_sharpe=-1.0320 coverage=0.8333
+seed=123 run=30 score=-0.6821 net_sharpe=-1.0320 coverage=0.8333
+seed=777 run=31 score=-0.6821 net_sharpe=-1.0320 coverage=0.8333
+saved out/benchmark_defaults.json

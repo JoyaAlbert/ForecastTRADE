@@ -60,6 +60,18 @@ class RuntimeFlags:
     cost_bps: float = 20.0
     slippage_bps: float = 5.0
     cv_scheme: str = "sliding"
+    seq_encoder: str = "tcn"
+    target_coverage: float = 0.16
+    threshold_search: str = "quantile"
+    trade_ratio_floor: float = 0.09
+    conservative_th_min: float = 0.60
+    conservative_th_max: float = 0.64
+    xgb_stochastic_mode: str = "off"
+    xgb_candidate_budget: str = "medium"
+    encoder_ablation: str = "off"
+    benchmark_tickers: str = "MSFT,AAPL,NVDA"
+    robust_std_weight: float = 0.5
+    net_return_floor_fold: float = -0.002
     config_path: Optional[str] = None
 
     @property
@@ -81,6 +93,18 @@ class RuntimeFlags:
         cost_bps: float = 20.0,
         slippage_bps: float = 5.0,
         cv_scheme: str = "sliding",
+        seq_encoder: str = "tcn",
+        target_coverage: float = 0.16,
+        threshold_search: str = "quantile",
+        trade_ratio_floor: float = 0.09,
+        conservative_th_min: float = 0.60,
+        conservative_th_max: float = 0.64,
+        xgb_stochastic_mode: str = "off",
+        xgb_candidate_budget: str = "medium",
+        encoder_ablation: str = "off",
+        benchmark_tickers: str = "MSFT,AAPL,NVDA",
+        robust_std_weight: float = 0.5,
+        net_return_floor_fold: float = -0.002,
         config_path: Optional[str] = None,
     ) -> "RuntimeFlags":
         mode = mode.lower()
@@ -90,6 +114,12 @@ class RuntimeFlags:
         objective = (objective or "sharpe_net").lower()
         risk_profile = (risk_profile or "conservative").lower()
         cv_scheme = (cv_scheme or "sliding").lower()
+        seq_encoder = (seq_encoder or "tcn").lower()
+        threshold_search = (threshold_search or "quantile").lower()
+        xgb_stochastic_mode = (xgb_stochastic_mode or "off").lower()
+        xgb_candidate_budget = (xgb_candidate_budget or "medium").lower()
+        encoder_ablation = (encoder_ablation or "off").lower()
+        benchmark_tickers = str(benchmark_tickers or "MSFT,AAPL,NVDA")
 
         if mode not in {"full", "fast"}:
             mode = "full"
@@ -105,6 +135,16 @@ class RuntimeFlags:
             risk_profile = "conservative"
         if cv_scheme not in {"sliding", "purged"}:
             cv_scheme = "sliding"
+        if seq_encoder not in {"lstm", "tcn", "off"}:
+            seq_encoder = "tcn"
+        if threshold_search not in {"grid", "quantile"}:
+            threshold_search = "quantile"
+        if xgb_stochastic_mode not in {"on", "off"}:
+            xgb_stochastic_mode = "off"
+        if xgb_candidate_budget not in {"low", "medium", "high"}:
+            xgb_candidate_budget = "medium"
+        if encoder_ablation not in {"on", "off"}:
+            encoder_ablation = "off"
 
         # Fast defaults: no fold-by-fold plotting unless explicitly requested.
         if mode == "fast" and plots == "all":
@@ -120,6 +160,18 @@ class RuntimeFlags:
             cost_bps=float(cost_bps),
             slippage_bps=float(slippage_bps),
             cv_scheme=cv_scheme,
+            seq_encoder=seq_encoder,
+            target_coverage=float(target_coverage),
+            threshold_search=threshold_search,
+            trade_ratio_floor=float(trade_ratio_floor),
+            conservative_th_min=float(conservative_th_min),
+            conservative_th_max=float(conservative_th_max),
+            xgb_stochastic_mode=xgb_stochastic_mode,
+            xgb_candidate_budget=xgb_candidate_budget,
+            encoder_ablation=encoder_ablation,
+            benchmark_tickers=benchmark_tickers,
+            robust_std_weight=float(robust_std_weight),
+            net_return_floor_fold=float(net_return_floor_fold),
             config_path=config_path,
         )
 

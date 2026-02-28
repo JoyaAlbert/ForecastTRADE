@@ -37,14 +37,28 @@ def find_optimal_buy_threshold_sharpe(
     cost_rate: float = 0.0,
     slippage_rate: float = 0.0,
     max_trades_ratio: float | None = None,
+    search_mode: str = "grid",
+    target_coverage_ratio: float = 0.12,
+    turnover_penalty: float = 0.0,
+    trade_ratio_floor: float = 0.08,
 ) -> Tuple[float, Dict[str, float]]:
-    threshold_buy_range = np.arange(0.45, 0.80, 0.05)
+    search_mode = (search_mode or "grid").lower()
+    if search_mode == "quantile":
+        # Higher quantiles => stricter thresholds.
+        quantiles = np.linspace(0.50, 0.95, 10)
+        threshold_buy_range = np.unique(np.quantile(proba_preds, quantiles))
+    else:
+        threshold_buy_range = np.arange(0.45, 0.80, 0.05)
+
     best_sharpe = -np.inf
     best_threshold_buy = 0.65
     best_stats: Dict[str, float] = {}
     min_required = max(int(len(proba_preds) * float(min_trades_ratio)), int(min_samples))
     raw_returns = np.asarray(raw_returns, dtype=float)
     trade_cost = float(cost_rate + slippage_rate)
+    target_coverage_ratio = float(np.clip(target_coverage_ratio, 0.01, 1.0))
+    turnover_penalty = float(max(0.0, turnover_penalty))
+    trade_ratio_floor = float(np.clip(trade_ratio_floor, 0.01, 1.0))
 
     for th_buy in threshold_buy_range:
         trade_mask = proba_preds >= th_buy
@@ -52,6 +66,8 @@ def find_optimal_buy_threshold_sharpe(
         if n_trades < min_required:
             continue
         trade_ratio = float(n_trades / max(1, len(proba_preds)))
+        if trade_ratio < trade_ratio_floor:
+            continue
         if max_trades_ratio is not None and trade_ratio > float(max_trades_ratio):
             continue
 
@@ -65,18 +81,26 @@ def find_optimal_buy_threshold_sharpe(
             sharpe = float(strategy_returns.mean() / strategy_returns.std() * np.sqrt(252))
         else:
             sharpe = 0.0
-        if sharpe > best_sharpe:
-            best_sharpe = sharpe
+        coverage_penalty = abs(trade_ratio - target_coverage_ratio)
+        turnover = float(np.sum(turnover_series))
+        objective_score = sharpe - turnover_penalty * turnover - (coverage_penalty * 1.20)
+
+        if objective_score > best_sharpe:
+            best_sharpe = objective_score
             best_threshold_buy = float(th_buy)
             win_rate = float((active_returns > 0).sum() / len(active_returns)) if len(active_returns) > 0 else 0.0
             avg_return = float(active_returns.mean()) if len(active_returns) > 0 else 0.0
             best_stats = {
                 "sharpe": sharpe,
+                "objective_score": float(objective_score),
                 "n_trades": n_trades,
                 "trade_ratio": trade_ratio,
-                "turnover": float(np.sum(turnover_series)),
+                "turnover": turnover,
                 "win_rate": win_rate,
                 "avg_return": avg_return,
+                "coverage_penalty": float(coverage_penalty),
+                "trade_ratio_floor": float(trade_ratio_floor),
                 "threshold_buy": float(th_buy),
+                "search_mode": search_mode,
             }
     return float(best_threshold_buy), best_stats

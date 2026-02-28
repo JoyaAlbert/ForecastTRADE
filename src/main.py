@@ -56,6 +56,12 @@ try:
         generate_placeholder_lstm_features,
         generate_lstm_regime_features_train_only,
     )
+    from .tcn_predictor import (
+        fold_cache_key,
+        generate_placeholder_tcn_features,
+        generate_tcn_regime_features,
+        generate_tcn_regime_features_train_only,
+    )
     from .run_logger import AccumulativeRunLogger
     from .rich_ui import RichUI
     from .utils.runtime import (
@@ -101,6 +107,12 @@ except ImportError:
         generate_lstm_regime_features,
         generate_placeholder_lstm_features,
         generate_lstm_regime_features_train_only,
+    )
+    from tcn_predictor import (
+        fold_cache_key,
+        generate_placeholder_tcn_features,
+        generate_tcn_regime_features,
+        generate_tcn_regime_features_train_only,
     )
     from run_logger import AccumulativeRunLogger
     from rich_ui import RichUI
@@ -163,12 +175,19 @@ class Config:
     OBJECTIVE = "sharpe_net"
     RISK_PROFILE = "conservative"
     CV_SCHEME = "sliding"
+    SEQ_ENCODER = "tcn"
+    THRESHOLD_SEARCH_MODE = "quantile"
+    TARGET_COVERAGE_RATIO = 0.16
+    NET_SHARPE_TURNOVER_PENALTY = 0.15
+    TRADE_RATIO_FLOOR = 0.09
     COST_BPS = 20.0
     SLIPPAGE_BPS = 5.0
     MIN_COVERAGE_RATIO = 0.5
     CONSERVATIVE_MIN_BUY_THRESHOLD = 0.66
+    CONSERVATIVE_MIN_BUY_THRESHOLD_MIN = 0.60
+    CONSERVATIVE_MIN_BUY_THRESHOLD_MAX = 0.64
     CONSERVATIVE_MAX_TRADE_RATIO = 0.22
-    CONSERVATIVE_PERCENTILE_THRESHOLD = 80
+    CONSERVATIVE_PERCENTILE_THRESHOLD = 70
     CONSERVATIVE_MIN_CONFIDENCE = 0.62
     CONSERVATIVE_UNCERTAINTY_BAND = 0.12
     CONSERVATIVE_VOL_PENALTY_MULT = 1.25
@@ -257,12 +276,46 @@ class Config:
     ENABLE_STABILITY_TUNING = True  # Lightweight fold-level tuning for robust performance
     TUNE_ON_FIRST_VALID_FOLD_ONLY = True  # Tune once, reuse for remaining folds (faster + stabler)
     STABILITY_TUNING_MAX_CANDIDATES = 8
+    XGB_STOCHASTIC_MODE = False
+    XGB_CANDIDATE_BUDGET: Literal["low", "medium", "high"] = "medium"
+    XGB_TUNING_CANDIDATES_LOW = 8
+    XGB_TUNING_CANDIDATES_MEDIUM = 18
+    XGB_TUNING_CANDIDATES_HIGH = 30
+    XGB_SCORE_W_NET_SHARPE = 0.60
+    XGB_SCORE_W_COVERAGE = 0.20
+    XGB_SCORE_W_AUC = 0.15
+    XGB_SCORE_W_TURNOVER = 0.05
+    XGB_TURNOVER_TARGET_RATIO = 0.12
+    XGB_NEG_NET_RETURN_PENALTY = 0.20
+    XGB_COVERAGE_FLOOR_PENALTY = 2.50
+    XGB_HIGH_RISK_MAX_DEPTH = 7
+    XGB_HIGH_RISK_MAX_LR = 0.03
+    NET_RETURN_FLOOR_PER_FOLD = -0.002
+    MIN_VALID_FOLDS_RATIO = 0.83
+    ROBUST_SCORE_STD_WEIGHT = 0.5
+    ENCODER_ABLATION_ENABLED = True
+    ENCODER_REQUIRED_DELTA_ROBUST_SCORE = 0.02
+    ENCODER_REQUIRED_DELTA_NET_SHARPE = 0.05
+    BENCHMARK_TICKERS = ["MSFT", "AAPL", "NVDA"]
     STABILITY_TUNING_MIN_TRADES = 8
+    STABILITY_TUNING_EARLY_STOP_EPS = 0.002
+    STABILITY_TUNING_EARLY_STOP_PATIENCE = 2
     USE_SYNTHETIC_SAMPLING = True  # ADASYN/SMOTE for class balancing
     ENABLE_PROBA_CALIBRATION = True
-    CALIBRATION_METHOD: Literal["isotonic", "sigmoid"] = "isotonic"
+    CALIBRATION_METHOD: Literal["isotonic", "sigmoid"] = "sigmoid"
     CALIBRATION_MIN_SAMPLES = 300
+    CALIBRATION_FALLBACK_METHOD: Literal["sigmoid"] = "sigmoid"
+    MAX_CALIBRATION_ECE_ALERT = 0.35
     LSTM_LEAKAGE_SAFE_MODE = True  # Refit LSTM per fold on train only
+    TCN_PARAMS = {
+        "channels": 64,
+        "kernel_size": 3,
+        "dilation_levels": [1, 2, 4, 8],
+        "dropout": 0.15,
+        "latent_dim": 10,
+        "epochs": 50,
+        "batch_size": 64,
+    }
     ENABLE_REGIME_SPLIT_MODEL = False  # Experimental two-model regime router
     REGIME_VOL_Z_THRESHOLD = 1.0
     
@@ -275,7 +328,7 @@ class Config:
     POSITION_SIZE_VOL_RISK_PENALTY = 0.35  # Exposure reduction in high-vol regimes
     POSITION_SIZE_MAX = 1.0
     ENABLE_REGIME_HARD_GATE = True  # Block all long entries in hostile regime
-    HARD_GATE_VOL_ZSCORE = 1.20  # High-volatility cutoff
+    HARD_GATE_VOL_ZSCORE = 1.80  # Extreme-volatility cutoff
     HARD_GATE_BEARISH_MA200_RATIO = 0.60  # If >60% samples are >2% below MA200
     # Modes explained:
     #   - "threshold": Classic approach - buy if proba >= threshold
@@ -592,6 +645,9 @@ def create_advanced_features(df):
     print("\n🚀 Creating Advanced Feature Interactions (Optimized)...")
     
     df = df.copy()
+    df, dropped_seq = drop_redundant_seq_equivalents(df)
+    if dropped_seq:
+        print(f"   ♻️ Dropped redundant seq-equivalent features: {', '.join(dropped_seq[:6])}" + ("..." if len(dropped_seq) > 6 else ""))
     
     # === HIGH-IMPACT TECHNICAL RATIOS ONLY ===
     print("   📊 Adding high-impact technical ratios...")
@@ -673,12 +729,31 @@ def filter_low_importance_features(df, known_low_importance=None):
         'volume_ratio',  # Often noisy in crypto/stocks
         'regime_change', # Identified as low importance
     ]
+    default_low_importance = list(dict.fromkeys(default_low_importance))
     
+    # Learn persistent low-importance features from recent run logs.
+    # A feature is considered persistent if it appears with <1% importance
+    # in at least 3 of the last 5 runs.
+    persistent_low = []
+    log_path = "out/runs_log.json"
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                log_data = json.load(f)
+            recent_runs = list(log_data.get("runs", []))[-5:]
+            low_counter = {}
+            for run in recent_runs:
+                for feat in run.get("features_contract", {}).get("removed_by_importance", []):
+                    low_counter[feat] = low_counter.get(feat, 0) + 1
+            persistent_low = [feat for feat, count in low_counter.items() if count >= 3]
+        except Exception:
+            persistent_low = []
+
     # Merge with any provided low-importance features
     if known_low_importance:
-        features_to_drop = list(set(default_low_importance + known_low_importance))
+        features_to_drop = list(set(default_low_importance + known_low_importance + persistent_low))
     else:
-        features_to_drop = default_low_importance
+        features_to_drop = list(set(default_low_importance + persistent_low))
     
     # Don't drop protected columns
     features_to_drop = [f for f in features_to_drop if f not in protected_cols and f in df.columns]
@@ -692,6 +767,23 @@ def filter_low_importance_features(df, known_low_importance=None):
         print("   ℹ️ No low-importance features found to drop")
     
     return df, features_to_drop
+
+
+def drop_redundant_seq_equivalents(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Drop redundant tcn_* columns when an equivalent lstm_* column exists.
+    Keeps backward-compatible lstm contract as training source of truth.
+    """
+    out = df.copy()
+    dropped: list[str] = []
+    equivalent_suffixes = ["price_5d", "price_10d", "price_20d", "return_5d", "return_10d", "return_20d", "dir_5d", "dir_10d", "dir_20d", "return_confidence"]
+    for suffix in equivalent_suffixes:
+        lstm_col = f"lstm_{suffix}"
+        tcn_col = f"tcn_{suffix}"
+        if lstm_col in out.columns and tcn_col in out.columns:
+            out = out.drop(columns=[tcn_col], errors="ignore")
+            dropped.append(tcn_col)
+    return out, dropped
 
 
 def resolve_feature_contract(
@@ -856,8 +948,19 @@ def define_target(df):
 def get_feature_columns(df, feature_contract: Optional[Dict[str, Any]] = None):
     """Get the effective feature columns from the resolved contract."""
     if feature_contract is not None:
-        return [c for c in feature_contract.get('final', []) if c in df.columns]
-    return [c for c in Config.FEATURES_TO_SCALE if c in df.columns]
+        cols = [c for c in feature_contract.get('final', []) if c in df.columns]
+    else:
+        cols = [c for c in Config.FEATURES_TO_SCALE if c in df.columns]
+
+    # Safety guard: if both seq branches are present, prioritize lstm_* contract columns.
+    filtered = []
+    for c in cols:
+        if c.startswith("tcn_"):
+            maybe_lstm = "lstm_" + c[len("tcn_") :]
+            if maybe_lstm in cols:
+                continue
+        filtered.append(c)
+    return filtered
 
 def preprocess_data_raw(df, feature_contract: Optional[Dict[str, Any]] = None):
     """
@@ -918,6 +1021,7 @@ def apply_probability_threshold(
     percentile_threshold=None,
     mode='threshold',
     trading_mode: Literal["long_only", "long_short"] = "long_only",
+    return_diagnostics: bool = False,
 ):
     """
     Intelligent position opening with multiple filtering strategies.
@@ -939,10 +1043,17 @@ def apply_probability_threshold(
         np.array: Filtered predictions (only high-confidence trades)
     """
     filtered = np.zeros_like(proba_preds, dtype=int)
+    diagnostics = {
+        "threshold_rejected": 0,
+        "percentile_rejected": 0,
+        "technical_rejected": 0,
+        "raw_buy_candidates": int(np.sum(proba_preds >= threshold_buy)),
+    }
     
     if mode == 'threshold':
         # Simple threshold: only buy if proba >= threshold
         filtered[proba_preds >= threshold_buy] = 1
+        diagnostics["threshold_rejected"] = int(np.sum(proba_preds < threshold_buy))
         
     elif mode == 'percentile':
         # Top-X% strategy: only buy the top X% most confident predictions
@@ -950,11 +1061,13 @@ def apply_probability_threshold(
             percentile_threshold = 80  # Top 20% by default
         cutoff = np.percentile(proba_preds, percentile_threshold)
         filtered[proba_preds >= cutoff] = 1
+        diagnostics["percentile_rejected"] = int(np.sum(proba_preds < cutoff))
         
     elif mode == 'hybrid':
         # Hybrid: threshold + percentile + technical validation
         # Step 1: Pass minimum confidence threshold
         high_conf = proba_preds >= threshold_buy
+        diagnostics["threshold_rejected"] = int(np.sum(~high_conf))
         
         # Step 2: Among high confidence, take top percentile
         if percentile_threshold is None:
@@ -963,6 +1076,7 @@ def apply_probability_threshold(
         if len(high_conf_proba) > 0:
             cutoff = np.percentile(high_conf_proba, percentile_threshold)
             top_trades = (proba_preds >= cutoff) & high_conf
+            diagnostics["percentile_rejected"] = int(np.sum(high_conf & (~top_trades)))
         else:
             top_trades = high_conf
         
@@ -987,12 +1101,16 @@ def apply_probability_threshold(
             
             # Combine with top trades
             filtered[top_trades & technical_filter] = 1
+            diagnostics["technical_rejected"] = int(np.sum(top_trades & (~technical_filter)))
         else:
             # No technical features, just use top trades
             filtered[top_trades] = 1
-    
+
     if trading_mode == "long_short":
         filtered[proba_preds <= threshold_sell] = -1
+    if return_diagnostics:
+        diagnostics["post_filters_buy_signals"] = int(np.sum(filtered == 1))
+        return filtered, diagnostics
     return filtered
 
 def find_optimal_threshold(y_true, proba_preds, metric="f1", min_recall=0.25, min_precision=0.25):
@@ -1009,6 +1127,10 @@ def find_optimal_buy_threshold_sharpe(
     cost_rate=0.0,
     slippage_rate=0.0,
     max_trades_ratio=None,
+    search_mode="grid",
+    target_coverage_ratio=0.12,
+    turnover_penalty=0.0,
+    trade_ratio_floor=0.08,
 ):
     _ = y_true
     return find_optimal_buy_threshold_sharpe_v2(
@@ -1019,6 +1141,10 @@ def find_optimal_buy_threshold_sharpe(
         cost_rate=cost_rate,
         slippage_rate=slippage_rate,
         max_trades_ratio=max_trades_ratio,
+        search_mode=search_mode,
+        target_coverage_ratio=target_coverage_ratio,
+        turnover_penalty=turnover_penalty,
+        trade_ratio_floor=trade_ratio_floor,
     )
 
 
@@ -1232,6 +1358,75 @@ def _compute_regime_mask(X_train_unscaled, X_target_unscaled):
     return z > Config.REGIME_VOL_Z_THRESHOLD
 
 
+def compute_effective_seed(
+    base_seed: int,
+    fold_idx: int = 0,
+    candidate_idx: int = 0,
+    stochastic_mode: bool = False,
+) -> int:
+    """Derive effective seed for controlled stochastic behavior."""
+    if not stochastic_mode:
+        return int(base_seed)
+    return int(base_seed) + int(fold_idx) * 100 + int(candidate_idx)
+
+
+def get_xgb_candidate_budget_size(budget: str = "medium") -> int:
+    budget = (budget or "medium").lower()
+    if budget == "low":
+        return int(getattr(Config, "XGB_TUNING_CANDIDATES_LOW", 8))
+    if budget == "high":
+        return int(getattr(Config, "XGB_TUNING_CANDIDATES_HIGH", 30))
+    return int(getattr(Config, "XGB_TUNING_CANDIDATES_MEDIUM", 18))
+
+
+def build_xgb_tuning_candidates(budget: str = "medium", max_candidates: Optional[int] = None) -> List[Dict[str, float]]:
+    """Return candidate set by budget level (low/medium/high)."""
+    base_candidates: List[Dict[str, float]] = [
+        {'max_depth': 4, 'learning_rate': 0.03, 'n_estimators': 450, 'subsample': 0.80, 'colsample_bytree': 0.80, 'min_child_weight': 3, 'gamma': 0.30, 'reg_alpha': 0.25, 'reg_lambda': 1.10},
+        {'max_depth': 5, 'learning_rate': 0.025, 'n_estimators': 500, 'subsample': 0.82, 'colsample_bytree': 0.82, 'min_child_weight': 3, 'gamma': 0.25, 'reg_alpha': 0.20, 'reg_lambda': 1.00},
+        {'max_depth': 6, 'learning_rate': 0.02, 'n_estimators': 600, 'subsample': 0.85, 'colsample_bytree': 0.85, 'min_child_weight': 2, 'gamma': 0.20, 'reg_alpha': 0.20, 'reg_lambda': 1.00},
+        {'max_depth': 4, 'learning_rate': 0.02, 'n_estimators': 700, 'subsample': 0.88, 'colsample_bytree': 0.86, 'min_child_weight': 4, 'gamma': 0.35, 'reg_alpha': 0.30, 'reg_lambda': 1.20},
+        {'max_depth': 5, 'learning_rate': 0.018, 'n_estimators': 750, 'subsample': 0.84, 'colsample_bytree': 0.84, 'min_child_weight': 2, 'gamma': 0.22, 'reg_alpha': 0.22, 'reg_lambda': 1.05},
+        {'max_depth': 3, 'learning_rate': 0.035, 'n_estimators': 400, 'subsample': 0.78, 'colsample_bytree': 0.78, 'min_child_weight': 5, 'gamma': 0.40, 'reg_alpha': 0.35, 'reg_lambda': 1.30},
+        {'max_depth': 6, 'learning_rate': 0.015, 'n_estimators': 900, 'subsample': 0.80, 'colsample_bytree': 0.80, 'min_child_weight': 3, 'gamma': 0.28, 'reg_alpha': 0.28, 'reg_lambda': 1.15},
+        {'max_depth': 5, 'learning_rate': 0.03, 'n_estimators': 450, 'subsample': 0.90, 'colsample_bytree': 0.88, 'min_child_weight': 2, 'gamma': 0.18, 'reg_alpha': 0.15, 'reg_lambda': 0.95},
+        {'max_depth': 4, 'learning_rate': 0.04, 'n_estimators': 350, 'subsample': 0.85, 'colsample_bytree': 0.75, 'min_child_weight': 4, 'gamma': 0.45, 'reg_alpha': 0.40, 'reg_lambda': 1.40},
+        {'max_depth': 6, 'learning_rate': 0.025, 'n_estimators': 550, 'subsample': 0.92, 'colsample_bytree': 0.90, 'min_child_weight': 1, 'gamma': 0.12, 'reg_alpha': 0.10, 'reg_lambda': 0.90},
+        {'max_depth': 7, 'learning_rate': 0.018, 'n_estimators': 700, 'subsample': 0.78, 'colsample_bytree': 0.82, 'min_child_weight': 3, 'gamma': 0.24, 'reg_alpha': 0.20, 'reg_lambda': 1.30},
+        {'max_depth': 5, 'learning_rate': 0.015, 'n_estimators': 950, 'subsample': 0.86, 'colsample_bytree': 0.88, 'min_child_weight': 2, 'gamma': 0.20, 'reg_alpha': 0.18, 'reg_lambda': 1.05},
+        {'max_depth': 3, 'learning_rate': 0.025, 'n_estimators': 600, 'subsample': 0.82, 'colsample_bytree': 0.72, 'min_child_weight': 6, 'gamma': 0.50, 'reg_alpha': 0.45, 'reg_lambda': 1.50},
+        {'max_depth': 6, 'learning_rate': 0.03, 'n_estimators': 420, 'subsample': 0.88, 'colsample_bytree': 0.92, 'min_child_weight': 2, 'gamma': 0.16, 'reg_alpha': 0.12, 'reg_lambda': 0.85},
+        {'max_depth': 4, 'learning_rate': 0.018, 'n_estimators': 820, 'subsample': 0.76, 'colsample_bytree': 0.80, 'min_child_weight': 5, 'gamma': 0.34, 'reg_alpha': 0.30, 'reg_lambda': 1.25},
+        {'max_depth': 5, 'learning_rate': 0.022, 'n_estimators': 680, 'subsample': 0.90, 'colsample_bytree': 0.78, 'min_child_weight': 3, 'gamma': 0.26, 'reg_alpha': 0.22, 'reg_lambda': 1.00},
+        {'max_depth': 7, 'learning_rate': 0.014, 'n_estimators': 1000, 'subsample': 0.80, 'colsample_bytree': 0.86, 'min_child_weight': 2, 'gamma': 0.22, 'reg_alpha': 0.25, 'reg_lambda': 1.20},
+        {'max_depth': 4, 'learning_rate': 0.028, 'n_estimators': 500, 'subsample': 0.94, 'colsample_bytree': 0.94, 'min_child_weight': 2, 'gamma': 0.10, 'reg_alpha': 0.08, 'reg_lambda': 0.80},
+        {'max_depth': 3, 'learning_rate': 0.02, 'n_estimators': 780, 'subsample': 0.88, 'colsample_bytree': 0.76, 'min_child_weight': 7, 'gamma': 0.55, 'reg_alpha': 0.55, 'reg_lambda': 1.60},
+        {'max_depth': 8, 'learning_rate': 0.012, 'n_estimators': 1100, 'subsample': 0.74, 'colsample_bytree': 0.78, 'min_child_weight': 3, 'gamma': 0.30, 'reg_alpha': 0.22, 'reg_lambda': 1.30},
+        {'max_depth': 2, 'learning_rate': 0.05, 'n_estimators': 320, 'subsample': 0.90, 'colsample_bytree': 0.90, 'min_child_weight': 8, 'gamma': 0.60, 'reg_alpha': 0.60, 'reg_lambda': 1.80},
+        {'max_depth': 6, 'learning_rate': 0.017, 'n_estimators': 760, 'subsample': 0.84, 'colsample_bytree': 0.90, 'min_child_weight': 1, 'gamma': 0.14, 'reg_alpha': 0.10, 'reg_lambda': 0.95},
+        {'max_depth': 5, 'learning_rate': 0.027, 'n_estimators': 540, 'subsample': 0.87, 'colsample_bytree': 0.83, 'min_child_weight': 4, 'gamma': 0.29, 'reg_alpha': 0.27, 'reg_lambda': 1.10},
+        {'max_depth': 4, 'learning_rate': 0.016, 'n_estimators': 980, 'subsample': 0.79, 'colsample_bytree': 0.79, 'min_child_weight': 6, 'gamma': 0.38, 'reg_alpha': 0.34, 'reg_lambda': 1.35},
+        {'max_depth': 7, 'learning_rate': 0.02, 'n_estimators': 620, 'subsample': 0.91, 'colsample_bytree': 0.87, 'min_child_weight': 2, 'gamma': 0.18, 'reg_alpha': 0.14, 'reg_lambda': 0.92},
+        {'max_depth': 6, 'learning_rate': 0.01, 'n_estimators': 1300, 'subsample': 0.82, 'colsample_bytree': 0.82, 'min_child_weight': 4, 'gamma': 0.25, 'reg_alpha': 0.20, 'reg_lambda': 1.15},
+        {'max_depth': 5, 'learning_rate': 0.035, 'n_estimators': 360, 'subsample': 0.93, 'colsample_bytree': 0.90, 'min_child_weight': 2, 'gamma': 0.11, 'reg_alpha': 0.10, 'reg_lambda': 0.88},
+        {'max_depth': 3, 'learning_rate': 0.03, 'n_estimators': 520, 'subsample': 0.81, 'colsample_bytree': 0.74, 'min_child_weight': 7, 'gamma': 0.52, 'reg_alpha': 0.50, 'reg_lambda': 1.55},
+        {'max_depth': 8, 'learning_rate': 0.015, 'n_estimators': 900, 'subsample': 0.76, 'colsample_bytree': 0.84, 'min_child_weight': 3, 'gamma': 0.27, 'reg_alpha': 0.23, 'reg_lambda': 1.22},
+    ]
+
+    # Prune high-risk overfitting combos from default search space.
+    max_depth_risk = int(getattr(Config, "XGB_HIGH_RISK_MAX_DEPTH", 7))
+    max_lr_risk = float(getattr(Config, "XGB_HIGH_RISK_MAX_LR", 0.03))
+    filtered_candidates = []
+    for cand in base_candidates:
+        if int(cand.get("max_depth", 0)) >= max_depth_risk and float(cand.get("learning_rate", 0.0)) >= max_lr_risk:
+            continue
+        filtered_candidates.append(cand)
+
+    budget_size = get_xgb_candidate_budget_size(budget=budget)
+    effective_max = budget_size if max_candidates is None else int(max_candidates)
+    return filtered_candidates[:max(1, effective_max)]
+
+
 def tune_xgb_params_for_stability(
     X_train,
     y_train,
@@ -1241,34 +1436,52 @@ def tune_xgb_params_for_stability(
     base_params,
     scale_pos_weight,
     max_candidates: Optional[int] = None,
+    target_coverage_ratio: float = 0.12,
+    turnover_penalty: float = 0.15,
+    trade_ratio_floor: float = 0.08,
+    fold_idx: int = 0,
+    base_seed: Optional[int] = None,
+    stochastic_mode: bool = False,
+    candidate_budget: str = "medium",
 ):
     """
     Lightweight hyperparameter tuning focused on fold stability.
 
-    Objective combines AUCPR, AUC, Sharpe, and minimum trade activity,
-    favoring robust behavior over peak single-metric performance.
+    Objective prioritizes net trading quality (Sharpe + coverage + turnover control)
+    with predictive quality (AUCPR/AUC) as a secondary term.
     """
-    candidates = [
-        {'max_depth': 4, 'learning_rate': 0.03, 'n_estimators': 450, 'subsample': 0.80, 'colsample_bytree': 0.80, 'min_child_weight': 3, 'gamma': 0.30, 'reg_alpha': 0.25, 'reg_lambda': 1.10},
-        {'max_depth': 5, 'learning_rate': 0.025, 'n_estimators': 500, 'subsample': 0.82, 'colsample_bytree': 0.82, 'min_child_weight': 3, 'gamma': 0.25, 'reg_alpha': 0.20, 'reg_lambda': 1.00},
-        {'max_depth': 6, 'learning_rate': 0.02, 'n_estimators': 600, 'subsample': 0.85, 'colsample_bytree': 0.85, 'min_child_weight': 2, 'gamma': 0.20, 'reg_alpha': 0.20, 'reg_lambda': 1.00},
-        {'max_depth': 4, 'learning_rate': 0.02, 'n_estimators': 700, 'subsample': 0.88, 'colsample_bytree': 0.86, 'min_child_weight': 4, 'gamma': 0.35, 'reg_alpha': 0.30, 'reg_lambda': 1.20},
-        {'max_depth': 5, 'learning_rate': 0.018, 'n_estimators': 750, 'subsample': 0.84, 'colsample_bytree': 0.84, 'min_child_weight': 2, 'gamma': 0.22, 'reg_alpha': 0.22, 'reg_lambda': 1.05},
-        {'max_depth': 3, 'learning_rate': 0.035, 'n_estimators': 400, 'subsample': 0.78, 'colsample_bytree': 0.78, 'min_child_weight': 5, 'gamma': 0.40, 'reg_alpha': 0.35, 'reg_lambda': 1.30},
-        {'max_depth': 6, 'learning_rate': 0.015, 'n_estimators': 900, 'subsample': 0.80, 'colsample_bytree': 0.80, 'min_child_weight': 3, 'gamma': 0.28, 'reg_alpha': 0.28, 'reg_lambda': 1.15},
-        {'max_depth': 5, 'learning_rate': 0.03, 'n_estimators': 450, 'subsample': 0.90, 'colsample_bytree': 0.88, 'min_child_weight': 2, 'gamma': 0.18, 'reg_alpha': 0.15, 'reg_lambda': 0.95},
-    ]
-    effective_max = Config.STABILITY_TUNING_MAX_CANDIDATES if max_candidates is None else int(max_candidates)
-    candidates = candidates[:effective_max]
+    budget = (candidate_budget or getattr(Config, "XGB_CANDIDATE_BUDGET", "medium")).lower()
+    effective_max = get_xgb_candidate_budget_size(budget) if max_candidates is None else int(max_candidates)
+    candidates = build_xgb_tuning_candidates(budget=budget, max_candidates=effective_max)
+    root_seed = int(base_seed if base_seed is not None else getattr(Config, "SEED", 42))
+    w_net_sharpe = float(getattr(Config, "XGB_SCORE_W_NET_SHARPE", 0.60))
+    w_coverage = float(getattr(Config, "XGB_SCORE_W_COVERAGE", 0.20))
+    w_auc = float(getattr(Config, "XGB_SCORE_W_AUC", 0.15))
+    w_turnover = float(getattr(Config, "XGB_SCORE_W_TURNOVER", 0.05))
 
     best_score = -np.inf
     best_params = None
     best_meta = {}
+    no_improve_count = 0
+    discard_reasons = {
+        "min_trades": 0,
+        "trade_ratio_floor": 0,
+        "net_return_floor": 0,
+    }
+    trade_ratio_floor_effective = float(max(trade_ratio_floor, Config.THRESHOLD_MIN_TRADES_RATIO))
+    net_return_floor = float(getattr(Config, "NET_RETURN_FLOOR_PER_FOLD", -0.002))
 
-    for candidate in candidates:
+    for candidate_idx, candidate in enumerate(candidates):
         params = base_params.copy()
         params.update(candidate)
         params['scale_pos_weight'] = scale_pos_weight
+        seed_eff = compute_effective_seed(
+            base_seed=root_seed,
+            fold_idx=fold_idx,
+            candidate_idx=candidate_idx,
+            stochastic_mode=bool(stochastic_mode),
+        )
+        params['random_state'] = int(seed_eff)
 
         model = xgb.XGBClassifier(**params)
         model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
@@ -1284,6 +1497,9 @@ def tune_xgb_params_for_stability(
                 val_returns,
                 min_samples=Config.STABILITY_TUNING_MIN_TRADES,
                 min_trades_ratio=Config.THRESHOLD_MIN_TRADES_RATIO,
+                target_coverage_ratio=target_coverage_ratio,
+                turnover_penalty=turnover_penalty,
+                trade_ratio_floor=trade_ratio_floor,
             )
             preds = apply_probability_threshold(
                 proba,
@@ -1309,33 +1525,89 @@ def tune_xgb_params_for_stability(
 
         sharpe = th_stats.get('sharpe', 0.0) if th_stats else 0.0
         trade_ratio = trades / max(1, len(y_val))
-        trade_quality = min(trade_ratio / 0.25, 1.0)  # full credit if ~25%+ trading activity
+        turnover = float(th_stats.get("turnover", 0.0)) if th_stats else 0.0
+        turnover_ratio = turnover / max(1.0, float(len(y_val)))
+        if trades < int(Config.STABILITY_TUNING_MIN_TRADES):
+            discard_reasons["min_trades"] += 1
+            continue
+        if trade_ratio < trade_ratio_floor_effective:
+            discard_reasons["trade_ratio_floor"] += 1
+            continue
 
-        # Stability score: robust ranking, penalize too-few trades and negative Sharpe
-        score = (
-            0.40 * aucpr
-            + 0.20 * auc
-            + 0.30 * np.tanh(max(sharpe, 0.0) / 3.0)
-            + 0.10 * trade_quality
+        positions = (preds == 1).astype(float)
+        prev_pos = np.concatenate([[0.0], positions[:-1]])
+        turnover_series = np.abs(positions - prev_pos)
+        trade_cost = float(getattr(Config, "COST_BPS", 20.0) + getattr(Config, "SLIPPAGE_BPS", 5.0)) / 10000.0
+        strategy_returns = (np.asarray(val_returns, dtype=float) * positions) - (turnover_series * trade_cost)
+        strategy_std = float(np.std(strategy_returns))
+        net_return = float(np.sum(strategy_returns))
+        net_return_mean = float(np.mean(strategy_returns))
+        net_sharpe = (
+            float(np.mean(strategy_returns) / (strategy_std + 1e-12) * np.sqrt(252.0))
+            if strategy_std > 1e-12 else 0.0
         )
-        if trades < Config.STABILITY_TUNING_MIN_TRADES:
-            score -= 0.15
-        if sharpe < 0:
-            score -= 0.10
+        if net_return <= net_return_floor:
+            discard_reasons["net_return_floor"] += 1
+            continue
 
-        if score > best_score:
+        # Align to trading objective: prefer net Sharpe-like quality with coverage control,
+        # while preserving predictive quality as a secondary signal.
+        coverage_gap = abs(float(trade_ratio) - float(target_coverage_ratio))
+        coverage_score = max(0.0, 1.0 - (coverage_gap / max(float(target_coverage_ratio), 1e-6)))
+        floor_gap = max(0.0, float(trade_ratio_floor) - float(trade_ratio))
+        floor_penalty = float(getattr(Config, "XGB_COVERAGE_FLOOR_PENALTY", 2.5)) * (floor_gap ** 2)
+        auc_score = (0.7 * float(aucpr)) + (0.3 * float(auc))
+        net_sharpe_term = np.tanh(float(net_sharpe) / 3.0)
+        turnover_target_ratio = float(getattr(Config, "XGB_TURNOVER_TARGET_RATIO", 0.12))
+        turnover_excess = max(0.0, float(turnover_ratio) - turnover_target_ratio)
+        stability_penalty = max(
+            0.0,
+            (float(Config.STABILITY_TUNING_MIN_TRADES) * 1.5 - float(trades))
+            / max(1.0, float(Config.STABILITY_TUNING_MIN_TRADES) * 1.5),
+        ) * 0.05
+        neg_return_penalty = (
+            float(getattr(Config, "XGB_NEG_NET_RETURN_PENALTY", 0.20))
+            if net_return <= 0.0 else 0.0
+        )
+        score = (
+            (w_net_sharpe * net_sharpe_term)
+            + (w_coverage * coverage_score)
+            + (w_auc * auc_score)
+            - (w_turnover * turnover_excess)
+            - (float(turnover_penalty) * turnover_excess)
+            - floor_penalty
+            - stability_penalty
+            - neg_return_penalty
+        )
+
+        if score > (best_score + float(Config.STABILITY_TUNING_EARLY_STOP_EPS)):
             best_score = score
             best_params = params
             best_meta = {
                 'auc': float(auc),
                 'aucpr': float(aucpr),
                 'sharpe': float(sharpe),
+                'net_sharpe': float(net_sharpe),
                 'trades': trades,
+                'trade_ratio': float(trade_ratio),
+                'turnover': float(turnover),
+                'net_return': float(net_return),
+                'net_return_mean': float(net_return_mean),
                 'threshold_buy': float(th_buy),
                 'threshold_sell': float(th_sell) if Config.TRADING_MODE == "long_short" else None,
-                'score': float(score)
+                'score': float(score),
+                'seed_eff': int(seed_eff),
+                'candidate_idx': int(candidate_idx),
+                'discard_reasons': dict(discard_reasons),
             }
+            no_improve_count = 0
+        else:
+            no_improve_count += 1
+            if no_improve_count >= int(Config.STABILITY_TUNING_EARLY_STOP_PATIENCE):
+                break
 
+    if best_meta:
+        best_meta['discard_reasons'] = dict(discard_reasons)
     return best_params if best_params is not None else base_params.copy(), best_meta
 
 def create_volatility_weighted_classifier(base_model, volatility_weights=None):
@@ -1488,6 +1760,7 @@ def train_and_evaluate_timeseries(
             print(f"⚠️ Warning: VisualizationEngine initialization error: {e}")
     
     run_logger = AccumulativeRunLogger(log_file='out/runs_log.json')
+    run_logger.freeze_latest_as_baseline("v2.1_baseline_msft", ticker="MSFT")
     
     run_date = datetime.now().strftime('%Y-%m-%d_%H%M%S')
     run_number = run_logger.runs['metadata']['total_runs'] + 1
@@ -1530,18 +1803,29 @@ def train_and_evaluate_timeseries(
     total_trades_agg = 0
     tuned_params_cache = None
     last_plot_payload = None
-    effective_tuning_candidates = Config.STABILITY_TUNING_MAX_CANDIDATES
+    xgb_budget = (runtime_flags.xgb_candidate_budget or getattr(Config, "XGB_CANDIDATE_BUDGET", "medium")).lower()
+    xgb_stochastic_mode = runtime_flags.xgb_stochastic_mode == "on"
+    base_seed = int(getattr(Config, "SEED", 42))
+    effective_tuning_candidates = get_xgb_candidate_budget_size(xgb_budget)
     if runtime_flags.mode == "fast":
-        effective_tuning_candidates = min(3, Config.STABILITY_TUNING_MAX_CANDIDATES)
+        effective_tuning_candidates = min(3, effective_tuning_candidates)
     calibration_allowed = Config.ENABLE_PROBA_CALIBRATION and runtime_flags.mode == "full"
     cost_rate = runtime_flags.cost_bps / 10000.0
     slippage_rate = runtime_flags.slippage_bps / 10000.0
     conservative_mode = runtime_flags.risk_profile == "conservative"
-    leakage_safe_lstm = Config.LSTM_LEAKAGE_SAFE_MODE and runtime_flags.mode == "full"
+    seq_encoder = (runtime_flags.seq_encoder or Config.SEQ_ENCODER).lower()
+    leakage_safe_seq = Config.LSTM_LEAKAGE_SAFE_MODE and runtime_flags.mode == "full" and seq_encoder in {"lstm", "tcn"}
     lstm_feature_cols = [c for c in features if c.startswith("lstm_")]
+    seq_fold_cache = CacheManager(root_dir="out/cache/seq_fold", enabled=runtime_flags.cache_enabled)
     
     for fold_idx, (train_idx, val_idx) in enumerate(cv_splits, start=1):
         fold_start = time.perf_counter()
+        fold_seed = compute_effective_seed(
+            base_seed=base_seed,
+            fold_idx=fold_idx,
+            candidate_idx=0,
+            stochastic_mode=xgb_stochastic_mode,
+        )
         # Get train and test indices
         X_train_unscaled = X.iloc[train_idx].copy()
         X_val_unscaled = X.iloc[val_idx].copy()
@@ -1587,23 +1871,43 @@ def train_and_evaluate_timeseries(
             skipped_folds.append({'fold': fold_idx, 'reason': 'single_validation_class'})
             continue
 
-        if leakage_safe_lstm and lstm_feature_cols:
+        if leakage_safe_seq and lstm_feature_cols:
             with stage_profiler.timed("lstm_fold"):
                 try:
                     fold_idx_union = X_train_unscaled.index.union(X_val_unscaled.index).sort_values()
                     fold_block = df.loc[fold_idx_union].copy()
                     train_block = df.loc[X_train_unscaled.index].copy()
-                    fold_lstm_df = generate_lstm_regime_features_train_only(
-                        train_block,
-                        fold_block,
-                        ticker_name=Config.TICKER,
+                    cache_key = fold_cache_key(
+                        ticker=Config.TICKER,
+                        seq_encoder=seq_encoder,
+                        train_index=X_train_unscaled.index,
+                        val_index=X_val_unscaled.index,
+                        params=Config.TCN_PARAMS if seq_encoder == "tcn" else {"encoder": "lstm"},
                     )
+                    fold_lstm_df = seq_fold_cache.load_pickle(cache_key)
+                    if fold_lstm_df is None:
+                        if seq_encoder == "tcn":
+                            fold_lstm_df = generate_tcn_regime_features_train_only(
+                                train_block,
+                                fold_block,
+                                ticker_name=Config.TICKER,
+                                tcn_params=Config.TCN_PARAMS,
+                            )
+                        elif seq_encoder == "lstm":
+                            fold_lstm_df = generate_lstm_regime_features_train_only(
+                                train_block,
+                                fold_block,
+                                ticker_name=Config.TICKER,
+                            )
+                        else:
+                            fold_lstm_df = generate_placeholder_lstm_features(fold_block.copy())
+                        seq_fold_cache.save_pickle(cache_key, fold_lstm_df)
                     for col in lstm_feature_cols:
                         if col in fold_lstm_df.columns:
                             X_train_unscaled.loc[:, col] = fold_lstm_df.loc[X_train_unscaled.index, col].values
                             X_val_unscaled.loc[:, col] = fold_lstm_df.loc[X_val_unscaled.index, col].values
                 except Exception as exc:
-                    print(f"⚠️ Fold {fold_idx}: LSTM leakage-safe generation failed ({exc}); using cached LSTM features.")
+                    print(f"⚠️ Fold {fold_idx}: Sequence leakage-safe generation failed ({exc}); using cached sequence features.")
         
         # === CRITICAL: Scale ONLY on training data ===
         scaler = RobustScaler()
@@ -1645,11 +1949,11 @@ def train_and_evaluate_timeseries(
             minority_class_size = len(y_train[y_train == 0])
             k_neighbors = min(4, max(1, minority_class_size - 1))
             try:
-                adasyn = ADASYN(random_state=42, n_neighbors=k_neighbors, sampling_strategy=0.95)
+                adasyn = ADASYN(random_state=fold_seed, n_neighbors=k_neighbors, sampling_strategy=0.95)
                 X_train_smote, y_train_smote = adasyn.fit_resample(X_train_scaled, y_train)
             except (ValueError, RuntimeError):
                 try:
-                    smote = SMOTE(random_state=42, k_neighbors=k_neighbors, sampling_strategy=0.9)
+                    smote = SMOTE(random_state=fold_seed, k_neighbors=k_neighbors, sampling_strategy=0.9)
                     X_train_smote, y_train_smote = smote.fit_resample(X_train_scaled, y_train)
                 except ValueError:
                     X_train_smote, y_train_smote = X_train_scaled, y_train
@@ -1659,6 +1963,7 @@ def train_and_evaluate_timeseries(
         # === TRAIN MODEL WITH STABILITY-ORIENTED HYPERPARAMETERS ===
         xgb_params = Config.XGB_PARAMS.copy()
         xgb_params['scale_pos_weight'] = scale_pos_weight
+        xgb_params['random_state'] = fold_seed
 
         should_tune = Config.ENABLE_STABILITY_TUNING and (
             tuned_params_cache is None or not Config.TUNE_ON_FIRST_VALID_FOLD_ONLY
@@ -1675,8 +1980,16 @@ def train_and_evaluate_timeseries(
                 xgb_params,
                 scale_pos_weight,
                 max_candidates=effective_tuning_candidates,
+                target_coverage_ratio=runtime_flags.target_coverage,
+                turnover_penalty=Config.NET_SHARPE_TURNOVER_PENALTY,
+                trade_ratio_floor=Config.TRADE_RATIO_FLOOR,
+                fold_idx=fold_idx,
+                base_seed=base_seed,
+                stochastic_mode=xgb_stochastic_mode,
+                candidate_budget=xgb_budget,
             )
             xgb_params = tuned_params_cache.copy()
+            xgb_params['random_state'] = fold_seed
             # print(
             #     f"   ✅ Tuning selected: depth={xgb_params['max_depth']}, "
             #     f"lr={xgb_params['learning_rate']}, n_estimators={xgb_params['n_estimators']} "
@@ -1686,6 +1999,7 @@ def train_and_evaluate_timeseries(
         elif tuned_params_cache is not None:
             xgb_params = tuned_params_cache.copy()
             xgb_params['scale_pos_weight'] = scale_pos_weight
+            xgb_params['random_state'] = fold_seed
         
         if fold_idx == 1:
             pass
@@ -1739,12 +2053,15 @@ def train_and_evaluate_timeseries(
 
         fold_calibration_error = np.nan
         fold_brier = np.nan
-        if calibration_allowed and not Config.ENABLE_REGIME_SPLIT_MODEL and len(X_train_scaled) >= Config.CALIBRATION_MIN_SAMPLES:
-            method = Config.CALIBRATION_METHOD if len(X_train_scaled) >= 300 else "sigmoid"
+        min_calib_samples = min(int(Config.CALIBRATION_MIN_SAMPLES), 180)
+        if calibration_allowed and not Config.ENABLE_REGIME_SPLIT_MODEL and len(X_train_scaled) >= min_calib_samples:
+            use_large_split = len(X_train_scaled) >= int(Config.CALIBRATION_MIN_SAMPLES)
+            method = Config.CALIBRATION_METHOD if use_large_split else Config.CALIBRATION_FALLBACK_METHOD
+            calib_ratio = 0.20 if use_large_split else 0.15
             X_train_np = np.asarray(X_train_scaled[features], dtype=float)
             X_val_calib = np.asarray(X_val_scaled[features], dtype=float)
             raw_train_proba = model.predict_proba(X_train_np)[:, 1]
-            split_data = train_calibration_split(X_train_np, y_train.values, raw_train_proba, ratio=0.2)
+            split_data = train_calibration_split(X_train_np, y_train.values, raw_train_proba, ratio=calib_ratio)
             if split_data is not None:
                 proba_calib, y_calib = split_data
                 calibrator, calibration_reason = fit_probability_calibrator_v2(proba_calib, y_calib, method=method)
@@ -1752,10 +2069,35 @@ def train_and_evaluate_timeseries(
                     raw_val_proba = model.predict_proba(X_val_calib)[:, 1]
                     proba_preds = calibrator.predict_proba(raw_val_proba)[:, 1]
                     calibration_enabled = True
-                    calibration_method_used = method
+                    calibration_method_used = calibrator.kind
                     cal_stats = calibration_metrics(y_val.values, proba_preds)
                     fold_calibration_error = cal_stats["ece"]
                     fold_brier = cal_stats["brier"]
+                    if np.isfinite(fold_calibration_error) and fold_calibration_error > float(Config.MAX_CALIBRATION_ECE_ALERT):
+                        print(
+                            f"   ⚠️ Fold {fold_idx}: calibration ECE high "
+                            f"({fold_calibration_error:.3f} > {Config.MAX_CALIBRATION_ECE_ALERT:.3f})"
+                        )
+                        if calibration_method_used != "sigmoid":
+                            sigmoid_cal, sigmoid_reason = fit_probability_calibrator_v2(
+                                proba_calib,
+                                y_calib,
+                                method="sigmoid",
+                            )
+                            if sigmoid_cal is not None:
+                                sigmoid_proba = sigmoid_cal.predict_proba(raw_val_proba)[:, 1]
+                                sigmoid_stats = calibration_metrics(y_val.values, sigmoid_proba)
+                                sigmoid_ece = float(sigmoid_stats["ece"])
+                                if np.isfinite(sigmoid_ece) and sigmoid_ece < float(fold_calibration_error):
+                                    proba_preds = sigmoid_proba
+                                    fold_calibration_error = sigmoid_ece
+                                    fold_brier = float(sigmoid_stats["brier"])
+                                    calibration_method_used = "sigmoid"
+                                    calibration_reason = f"fallback_from_{calibrator.kind}_ece"
+                                else:
+                                    calibration_reason = f"{calibration_reason}|sigmoid_not_better"
+                            else:
+                                calibration_reason = f"{calibration_reason}|sigmoid_fit_failed"
                 else:
                     calibration_method_used = "none"
             else:
@@ -1793,6 +2135,10 @@ def train_and_evaluate_timeseries(
                         cost_rate=cost_rate,
                         slippage_rate=slippage_rate,
                         max_trades_ratio=Config.CONSERVATIVE_MAX_TRADE_RATIO if conservative_mode else None,
+                        search_mode=runtime_flags.threshold_search,
+                        target_coverage_ratio=runtime_flags.target_coverage,
+                        turnover_penalty=Config.NET_SHARPE_TURNOVER_PENALTY,
+                        trade_ratio_floor=Config.TRADE_RATIO_FLOOR,
                     )
                 else:
                     threshold_buy, threshold_sell, threshold_stats = find_optimal_thresholds_long_short(
@@ -1846,7 +2192,11 @@ def train_and_evaluate_timeseries(
             avg_vol_zscore = 0.0
 
         if conservative_mode:
-            threshold_buy = max(float(threshold_buy), float(Config.CONSERVATIVE_MIN_BUY_THRESHOLD))
+            threshold_buy = max(float(threshold_buy), float(Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MIN))
+            threshold_buy = min(float(threshold_buy), float(Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MAX))
+            if threshold_stats is None or len(threshold_stats) == 0:
+                # If optimizer can't find a constrained candidate, fallback inside conservative dynamic band.
+                threshold_buy = float(np.clip(threshold_buy, Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MIN, Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MAX))
 
         # Apply intelligent position opening strategy
         # print(f"   📍 Position Opening: {Config.POSITION_OPENING_MODE.upper()} mode")
@@ -1856,39 +2206,116 @@ def train_and_evaluate_timeseries(
 
         if Config.POSITION_OPENING_MODE == "hybrid":
             # Hybrid mode: threshold + percentile + technical validation
-            preds_thresholded = apply_probability_threshold(
+            preds_thresholded, filter_diag = apply_probability_threshold(
                 proba_preds_risk_adjusted,
                 threshold_buy,
                 threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
                 X_features=X_val_unscaled,  # Pass validation features for technical filters
                 percentile_threshold=effective_percentile_threshold,
                 mode='hybrid',
-                trading_mode=Config.TRADING_MODE
+                trading_mode=Config.TRADING_MODE,
+                return_diagnostics=True,
             )
         else:
             # Simple threshold or percentile mode
-            preds_thresholded = apply_probability_threshold(
+            preds_thresholded, filter_diag = apply_probability_threshold(
                 proba_preds_risk_adjusted,
                 threshold_buy,
                 threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
                 X_features=None,
                 percentile_threshold=effective_percentile_threshold,
                 mode=Config.POSITION_OPENING_MODE,
-                trading_mode=Config.TRADING_MODE
+                trading_mode=Config.TRADING_MODE,
+                return_diagnostics=True,
             )
-        
+
+        # Ensure a minimum trade coverage by relaxing threshold one step when needed.
+        fold_trade_ratio_floor = float(max(Config.TRADE_RATIO_FLOOR, Config.THRESHOLD_MIN_TRADES_RATIO))
+        if Config.TRADING_MODE == "long_only":
+            n_opened_pre_relax = int(np.sum(preds_thresholded == 1))
+            current_ratio = n_opened_pre_relax / max(1, len(preds_thresholded))
+            relax_steps = 0
+            if current_ratio < fold_trade_ratio_floor:
+                relaxed_buy = max(
+                    float(Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MIN if conservative_mode else 0.50),
+                    float(threshold_buy - 0.02),
+                )
+                if relaxed_buy < threshold_buy:
+                    threshold_buy = relaxed_buy
+                    preds_thresholded, relax_diag = apply_probability_threshold(
+                        proba_preds_risk_adjusted,
+                        threshold_buy,
+                        threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
+                        X_features=X_val_unscaled if Config.POSITION_OPENING_MODE == "hybrid" else None,
+                        percentile_threshold=effective_percentile_threshold,
+                        mode=Config.POSITION_OPENING_MODE,
+                        trading_mode=Config.TRADING_MODE,
+                        return_diagnostics=True,
+                    )
+                    filter_diag.update({k: int(relax_diag.get(k, filter_diag.get(k, 0))) for k in filter_diag.keys()})
+                    relax_steps = 1
+
+            # Second pass only if fold remains invalid after first relaxation.
+            current_ratio = int(np.sum(preds_thresholded == 1)) / max(1, len(preds_thresholded))
+            if current_ratio < fold_trade_ratio_floor and relax_steps == 1:
+                relaxed_buy_2 = max(
+                    float(Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MIN if conservative_mode else 0.50),
+                    float(threshold_buy - 0.01),
+                )
+                if relaxed_buy_2 < threshold_buy:
+                    threshold_buy = relaxed_buy_2
+                    preds_thresholded, relax_diag_2 = apply_probability_threshold(
+                        proba_preds_risk_adjusted,
+                        threshold_buy,
+                        threshold_sell if threshold_sell is not None else Config.PROBABILITY_THRESHOLD_SELL,
+                        X_features=X_val_unscaled if Config.POSITION_OPENING_MODE == "hybrid" else None,
+                        percentile_threshold=effective_percentile_threshold,
+                        mode=Config.POSITION_OPENING_MODE,
+                        trading_mode=Config.TRADING_MODE,
+                        return_diagnostics=True,
+                    )
+                    filter_diag.update({k: int(relax_diag_2.get(k, filter_diag.get(k, 0))) for k in filter_diag.keys()})
+                    relax_steps = 2
+            filter_diag["threshold_relaxed"] = int(relax_steps)
+        else:
+            filter_diag["threshold_relaxed"] = 0
+
         # Log position statistics with trading details
+        pre_gate_positions = int(np.sum(preds_thresholded == 1))
         preds_thresholded, gate_active, gate_reason = apply_regime_hard_gate(
             preds_thresholded,
             X_val_unscaled,
             avg_vol_zscore
         )
+        filter_diag["regime_gate_rejected"] = 0
+        if conservative_mode and Config.TRADING_MODE == "long_only":
+            # Hard cap on number of entries per fold to control turnover in conservative mode.
+            max_entries = max(1, int(len(preds_thresholded) * Config.CONSERVATIVE_MAX_TRADE_RATIO))
+            long_idx = np.where(preds_thresholded == 1)[0]
+            if len(long_idx) > max_entries:
+                ranked = long_idx[np.argsort(proba_preds_risk_adjusted[long_idx])[::-1]]
+                keep = set(ranked[:max_entries].tolist())
+                for idx in long_idx:
+                    if idx not in keep:
+                        preds_thresholded[idx] = 0
+                filter_diag["regime_gate_rejected"] += int(len(long_idx) - max_entries)
+
         if gate_active:
             print(f"   🛡️ Regime hard-gate active: {gate_reason}")
+            post_gate_positions = int(np.sum(preds_thresholded == 1))
+            filter_diag["regime_gate_rejected"] += max(0, pre_gate_positions - post_gate_positions)
 
         n_positions = np.sum(preds_thresholded == 1)
         position_rate = 100 * n_positions / len(preds_thresholded)
         print(f"   ✅ Positions opened: {n_positions}/{len(preds_thresholded)} ({position_rate:.1f}%)")
+        print(
+            "   🔎 Filter rejections: "
+            f"threshold={filter_diag.get('threshold_rejected', 0)} | "
+            f"percentile={filter_diag.get('percentile_rejected', 0)} | "
+            f"technical={filter_diag.get('technical_rejected', 0)} | "
+            f"regime_gate={filter_diag.get('regime_gate_rejected', 0)} | "
+            f"threshold_relaxed={filter_diag.get('threshold_relaxed', 0)}"
+        )
 
         # Dynamic position sizing (skip uncertain regimes/signals)
         if Config.ENABLE_POSITION_SIZING:
@@ -1911,8 +2338,10 @@ def train_and_evaluate_timeseries(
                 f"| skipped low_conf={size_stats['n_skipped_low_conf']} "
                 f"| avg size={size_stats['avg_size']:.3f}"
             )
+            filter_diag["confidence_rejected"] = int(size_stats['n_skipped_uncertain'] + size_stats['n_skipped_low_conf'])
         else:
             position_sizes = preds_thresholded.astype(float)
+            filter_diag["confidence_rejected"] = 0
         
         # === BACKTEST SUMMARY (Historical Performance) ===
         df_val = df.loc[X_val_unscaled.index].copy() if X_val_unscaled is not None else df.tail(len(preds_thresholded)).copy()
@@ -2039,7 +2468,25 @@ def train_and_evaluate_timeseries(
         total_return_agg += float(total_return)
         total_wins_agg += int(np.sum(strategy_returns_thresholded > 0))
         total_trades_agg += int(n_long_positions)
-        
+        n_long_signals_raw = int(filter_diag.get("raw_buy_candidates", np.sum(proba_preds_risk_adjusted >= threshold_buy)))
+        n_long_signals_post_filters = int(n_long_positions)
+        trade_coverage = float(n_long_signals_post_filters / max(1, len(preds_thresholded)))
+        vol_metric = np.maximum(df_val["close"].values, 1e-9)
+        if Config.DYNAMIC_RISK_VOL_METRIC == "atr_14d" and "atr" in df_val.columns:
+            unit_vol = np.nan_to_num(df_val["atr"].values / vol_metric, nan=0.0)
+        else:
+            if "rolling_std_20d" in df_val.columns:
+                unit_vol = np.nan_to_num(df_val["rolling_std_20d"].values / vol_metric, nan=0.0)
+            else:
+                unit_vol = np.nan_to_num(np.full(len(df_val), np.nanstd(val_returns_valid)), nan=0.0)
+        tp_pct_fold = np.clip(unit_vol * float(Config.DYNAMIC_RISK_K_TP), 0.0, 0.25)
+        sl_pct_fold = np.clip(unit_vol * float(Config.DYNAMIC_RISK_K_SL), 0.0, 0.25)
+        ev_series = (proba_preds_risk_adjusted * tp_pct_fold) - ((1.0 - proba_preds_risk_adjusted) * sl_pct_fold) - (cost_rate + slippage_rate)
+        if n_long_signals_post_filters > 0:
+            ev_mean_fold = float(np.nanmean(ev_series[preds_thresholded == 1]))
+        else:
+            ev_mean_fold = float(np.nanmean(ev_series))
+
         fold_results.append({
             'fold': fold_idx,
             'auc': auc,
@@ -2064,6 +2511,16 @@ def train_and_evaluate_timeseries(
             'fold_trades': int(n_long_positions),
             'n_trades_at_threshold': int(threshold_stats.get('n_trades', 0)) if threshold_stats else int(n_long_positions),
             'trade_ratio_at_threshold': float(threshold_stats.get('trade_ratio', 0.0)) if threshold_stats else float(n_long_positions / max(1, len(preds_thresholded))),
+            'trade_coverage': trade_coverage,
+            'n_long_signals_raw': n_long_signals_raw,
+            'n_long_signals_post_filters': n_long_signals_post_filters,
+            'ev_mean_fold': ev_mean_fold,
+            'filter_threshold_rejected': int(filter_diag.get("threshold_rejected", 0)),
+            'filter_percentile_rejected': int(filter_diag.get("percentile_rejected", 0)),
+            'filter_technical_rejected': int(filter_diag.get("technical_rejected", 0)),
+            'filter_regime_gate_rejected': int(filter_diag.get("regime_gate_rejected", 0)),
+            'filter_confidence_rejected': int(filter_diag.get("confidence_rejected", 0)),
+            'filter_threshold_relaxed': int(filter_diag.get("threshold_relaxed", 0)),
             'calibration_enabled': bool(calibration_enabled),
             'calibration_method': calibration_method_used,
             'calibration_reason': calibration_reason,
@@ -2290,6 +2747,10 @@ def train_and_evaluate_timeseries(
         print(f"Net Return:           {results_df['net_return'].mean():.4f} ± {results_df['net_return'].std():.4f}")
     if 'turnover' in results_df:
         print(f"Turnover:             {results_df['turnover'].mean():.4f} ± {results_df['turnover'].std():.4f}")
+    if 'trade_coverage' in results_df:
+        print(f"Trade Coverage:       {results_df['trade_coverage'].mean():.4f} ± {results_df['trade_coverage'].std():.4f}")
+    if 'ev_mean_fold' in results_df:
+        print(f"EV Mean/Fold:         {results_df['ev_mean_fold'].mean():.5f} ± {results_df['ev_mean_fold'].std():.5f}")
     print(f"Coverage Ratio:       {coverage_ratio:.4f}")
     print(f"Max Drawdown:         {results_df['max_drawdown'].mean():.4f} ± {results_df['max_drawdown'].std():.4f}")
     print("="*80)
@@ -2347,11 +2808,20 @@ def train_and_evaluate_timeseries(
         'net_return': float(results_df['net_return'].sum()) if 'net_return' in results_df else np.nan,
         'turnover': float(results_df['turnover'].sum()) if 'turnover' in results_df else np.nan,
         'recommendation_quality': recommendation_quality,
+        'trade_coverage': float(results_df['trade_coverage'].mean()) if 'trade_coverage' in results_df else np.nan,
+        'n_long_signals_raw': int(results_df['n_long_signals_raw'].sum()) if 'n_long_signals_raw' in results_df else 0,
+        'n_long_signals_post_filters': int(results_df['n_long_signals_post_filters'].sum()) if 'n_long_signals_post_filters' in results_df else 0,
+        'ev_mean_fold': float(results_df['ev_mean_fold'].mean()) if 'ev_mean_fold' in results_df else np.nan,
         'win_rate': float(total_wins_agg / total_trades_agg) if total_trades_agg > 0 else 0.0,
         'xgb_params': Config.XGB_PARAMS,
         'lstm_config': {
+            'encoder': seq_encoder,
             'window_size': 60,
-            'latent_dim': 32,
+            'latent_dim': (
+                int(Config.TCN_PARAMS.get('latent_dim', 10))
+                if seq_encoder == "tcn"
+                else (32 if seq_encoder == "lstm" else 0)
+            ),
             'horizons': [5, 10, 20]
         },
         'buy_signals': int(np.sum([np.sum(p > 0.65) for p in all_val_proba])),
@@ -2369,12 +2839,30 @@ def train_and_evaluate_timeseries(
             'cost_bps': runtime_flags.cost_bps,
             'slippage_bps': runtime_flags.slippage_bps,
             'cv_scheme': runtime_flags.cv_scheme,
+            'seq_encoder': runtime_flags.seq_encoder,
+            'target_coverage': runtime_flags.target_coverage,
+            'threshold_search': runtime_flags.threshold_search,
+            'trade_ratio_floor': runtime_flags.trade_ratio_floor,
+            'conservative_th_min': runtime_flags.conservative_th_min,
+            'conservative_th_max': runtime_flags.conservative_th_max,
+            'xgb_stochastic_mode': runtime_flags.xgb_stochastic_mode,
+            'xgb_candidate_budget': runtime_flags.xgb_candidate_budget,
+            'encoder_ablation': runtime_flags.encoder_ablation,
+            'benchmark_tickers': runtime_flags.benchmark_tickers,
+            'robust_std_weight': runtime_flags.robust_std_weight,
+            'net_return_floor_fold': runtime_flags.net_return_floor_fold,
         },
         'timings': stage_profiler.summary(),
         'notes': (
             f"Configured folds={cv_summary['configured_folds']}, valid={cv_summary['n_folds_valid']}, "
             f"min_validation={Config.MIN_VALIDATION_SIZE}, trading_mode={Config.TRADING_MODE}, "
-            f"mode={runtime_flags.mode}, plots={runtime_flags.plots}"
+            f"mode={runtime_flags.mode}, plots={runtime_flags.plots}, "
+            f"seq_encoder={runtime_flags.seq_encoder}, threshold_search={runtime_flags.threshold_search}, "
+            f"trade_ratio_floor={runtime_flags.trade_ratio_floor:.3f}, "
+            f"xgb_stochastic_mode={runtime_flags.xgb_stochastic_mode}, "
+            f"xgb_candidate_budget={runtime_flags.xgb_candidate_budget}, "
+            f"encoder_ablation={runtime_flags.encoder_ablation}, "
+            f"net_return_floor_fold={runtime_flags.net_return_floor_fold:.4f}"
         )
     }
     
@@ -2467,13 +2955,25 @@ def run_pipeline(run_config: RunConfig, selected_name: Optional[str] = None):
         ui.show_error("Failed to fetch initial data. Check tickers and network connection.")
         return {}
 
+    seq_encoder = (run_config.runtime.seq_encoder or Config.SEQ_ENCODER).lower()
+    if seq_encoder == "tcn":
+        generate_seq_fn = lambda data, ticker: generate_tcn_regime_features(data, ticker_name=ticker, tcn_params=Config.TCN_PARAMS)
+        generate_seq_placeholder_fn = lambda data: generate_placeholder_tcn_features(data, tcn_params=Config.TCN_PARAMS)
+    elif seq_encoder == "off":
+        # Encoder ablation mode: keep schema with deterministic placeholder features.
+        generate_seq_fn = lambda data, ticker: generate_placeholder_lstm_features(data.copy())
+        generate_seq_placeholder_fn = generate_placeholder_lstm_features
+    else:
+        generate_seq_fn = generate_lstm_regime_features
+        generate_seq_placeholder_fn = generate_placeholder_lstm_features
+
     main_df, feature_contract = run_feature_pipeline(
         df=main_df,
         ticker=run_config.data.ticker,
         runtime=run_config.runtime,
         cache=cache,
         profiler=profiler,
-        generate_lstm_fn=generate_lstm_regime_features,
+        generate_lstm_fn=generate_seq_fn,
         engineer_features_fn=engineer_features,
         create_advanced_features_fn=create_advanced_features,
         remove_correlated_features_fn=remove_correlated_features,
@@ -2482,7 +2982,7 @@ def run_pipeline(run_config: RunConfig, selected_name: Optional[str] = None):
         seed_features=Config.FEATURES_TO_SCALE,
         min_features=run_config.features.min_features,
         leakage_safe_lstm=(Config.LSTM_LEAKAGE_SAFE_MODE and run_config.runtime.mode == "full"),
-        placeholder_lstm_fn=generate_placeholder_lstm_features,
+        placeholder_lstm_fn=generate_seq_placeholder_fn,
     )
 
     print(f"\n📊 Feature engineering summary:")
@@ -2551,6 +3051,7 @@ def run_pipeline(run_config: RunConfig, selected_name: Optional[str] = None):
             sl_pct=float(sl_pct),
             cost_pct=cost_pct,
             regime_allowed=True,
+            min_ev_margin=0.001 if run_config.runtime.risk_profile == "conservative" else 0.0,
         )
 
         ui.show_final_summary(run_config.data.ticker, future_preds)
@@ -2593,6 +3094,18 @@ def _parse_cli_args(argv=None):
     parser.add_argument("--cost-bps", default=None, type=float, help="Transaction cost in bps")
     parser.add_argument("--slippage-bps", default=None, type=float, help="Slippage in bps")
     parser.add_argument("--cv-scheme", default=None, choices=["sliding", "purged"], help="Cross-validation scheme")
+    parser.add_argument("--seq-encoder", default=None, choices=["lstm", "tcn", "off"], help="Sequence encoder backend")
+    parser.add_argument("--target-coverage", default=None, type=float, help="Target long-signal coverage ratio")
+    parser.add_argument("--threshold-search", default=None, choices=["grid", "quantile"], help="Threshold search strategy")
+    parser.add_argument("--trade-ratio-floor", default=None, type=float, help="Minimum trade ratio floor per fold")
+    parser.add_argument("--conservative-th-min", default=None, type=float, help="Conservative minimum threshold floor")
+    parser.add_argument("--conservative-th-max", default=None, type=float, help="Conservative maximum threshold cap")
+    parser.add_argument("--xgb-stochastic-mode", default=None, choices=["on", "off"], help="Enable stochastic XGB seeds (benchmark mode)")
+    parser.add_argument("--xgb-candidate-budget", default=None, choices=["low", "medium", "high"], help="XGB tuning candidate budget")
+    parser.add_argument("--encoder-ablation", default=None, choices=["on", "off"], help="Enable benchmark encoder ablation mode")
+    parser.add_argument("--benchmark-tickers", default=None, help="Comma-separated benchmark tickers")
+    parser.add_argument("--robust-std-weight", default=None, type=float, help="Std penalty weight for robust score")
+    parser.add_argument("--net-return-floor-fold", default=None, type=float, help="Minimum fold net return for tuning candidate acceptance")
     parser.add_argument("--no-ui", action="store_true", help="Disable interactive ticker selection")
     return parser.parse_args(argv)
 
@@ -2612,8 +3125,29 @@ def main(argv=None):
         cost_bps=float(args.cost_bps if args.cost_bps is not None else getattr(Config, "COST_BPS", 20.0)),
         slippage_bps=float(args.slippage_bps if args.slippage_bps is not None else getattr(Config, "SLIPPAGE_BPS", 5.0)),
         cv_scheme=args.cv_scheme or getattr(Config, "CV_SCHEME", "sliding"),
+        seq_encoder=args.seq_encoder or getattr(Config, "SEQ_ENCODER", "tcn"),
+        target_coverage=float(args.target_coverage if args.target_coverage is not None else getattr(Config, "TARGET_COVERAGE_RATIO", 0.16)),
+        threshold_search=args.threshold_search or getattr(Config, "THRESHOLD_SEARCH_MODE", "quantile"),
+        trade_ratio_floor=float(args.trade_ratio_floor if args.trade_ratio_floor is not None else getattr(Config, "TRADE_RATIO_FLOOR", 0.09)),
+        conservative_th_min=float(args.conservative_th_min if args.conservative_th_min is not None else getattr(Config, "CONSERVATIVE_MIN_BUY_THRESHOLD_MIN", 0.60)),
+        conservative_th_max=float(args.conservative_th_max if args.conservative_th_max is not None else getattr(Config, "CONSERVATIVE_MIN_BUY_THRESHOLD_MAX", 0.64)),
+        xgb_stochastic_mode=args.xgb_stochastic_mode or ("on" if getattr(Config, "XGB_STOCHASTIC_MODE", False) else "off"),
+        xgb_candidate_budget=args.xgb_candidate_budget or getattr(Config, "XGB_CANDIDATE_BUDGET", "medium"),
+        encoder_ablation=args.encoder_ablation or ("on" if getattr(Config, "ENCODER_ABLATION_ENABLED", True) else "off"),
+        benchmark_tickers=args.benchmark_tickers or ",".join(getattr(Config, "BENCHMARK_TICKERS", ["MSFT", "AAPL", "NVDA"])),
+        robust_std_weight=float(args.robust_std_weight if args.robust_std_weight is not None else getattr(Config, "ROBUST_SCORE_STD_WEIGHT", 0.5)),
+        net_return_floor_fold=float(args.net_return_floor_fold if args.net_return_floor_fold is not None else getattr(Config, "NET_RETURN_FLOOR_PER_FOLD", -0.002)),
         config_path=args.config,
     )
+    Config.TRADE_RATIO_FLOOR = float(runtime.trade_ratio_floor)
+    Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MIN = float(runtime.conservative_th_min)
+    Config.CONSERVATIVE_MIN_BUY_THRESHOLD_MAX = float(runtime.conservative_th_max)
+    Config.XGB_STOCHASTIC_MODE = runtime.xgb_stochastic_mode == "on"
+    Config.XGB_CANDIDATE_BUDGET = runtime.xgb_candidate_budget
+    Config.ENCODER_ABLATION_ENABLED = runtime.encoder_ablation == "on"
+    Config.BENCHMARK_TICKERS = [t.strip().upper() for t in str(runtime.benchmark_tickers).split(",") if t.strip()]
+    Config.ROBUST_SCORE_STD_WEIGHT = float(runtime.robust_std_weight)
+    Config.NET_RETURN_FLOOR_PER_FOLD = float(runtime.net_return_floor_fold)
 
     selected_ticker = args.ticker
     selected_name = args.ticker

@@ -60,6 +60,18 @@ Opciones principales:
 - `--cost-bps`: coste por transacción en bps.
 - `--slippage-bps`: slippage en bps.
 - `--cv-scheme`: `sliding` | `purged`.
+- `--seq-encoder`: `off` | `lstm` | `tcn`.
+- `--target-coverage`: ratio objetivo de cobertura de señales (ej. `0.12`).
+- `--threshold-search`: `grid` | `quantile`.
+- `--trade-ratio-floor`: cobertura mínima de trades por fold.
+- `--conservative-th-min`: piso mínimo conservador para `threshold_buy`.
+- `--conservative-th-max`: techo máximo conservador para `threshold_buy`.
+- `--xgb-stochastic-mode`: `on` | `off`.
+- `--xgb-candidate-budget`: `low` | `medium` | `high`.
+- `--encoder-ablation`: `on` | `off`.
+- `--benchmark-tickers`: lista separada por comas (ej. `MSFT,AAPL,NVDA`).
+- `--robust-std-weight`: penalización por dispersión en ranking robusto.
+- `--net-return-floor-fold`: piso de retorno neto por fold en tuning.
 - `--no-ui`: desactiva selección interactiva.
 
 Ver ayuda:
@@ -67,6 +79,23 @@ Ver ayuda:
 ```bash
 python run.py --help
 ```
+
+Benchmark multi-seed + multi-config (selección real de defaults robustos):
+
+```bash
+python scripts/benchmark_defaults.py \
+  --tickers MSFT,AAPL,NVDA \
+  --seeds 42,77,101,123,777 \
+  --plots none --profile off \
+  --encoder-ablation on \
+  --xgb-stochastic-mode on \
+  --xgb-candidate-budget medium
+```
+
+Artefactos generados:
+- `out/benchmark_defaults_grid.json` (detalle por corrida y ranking)
+- `out/benchmark_defaults_grid.csv` (resumen tabular por candidato)
+- `out/recommended_default_config.yaml` (config recomendada)
 
 ## Configuración externa (`configs/default.yaml`)
 
@@ -78,6 +107,14 @@ Claves relevantes:
 - `OBJECTIVE`
 - `RISK_PROFILE`
 - `CV_SCHEME`
+- `SEQ_ENCODER`
+- `THRESHOLD_SEARCH_MODE`
+- `TARGET_COVERAGE_RATIO`
+- `NET_SHARPE_TURNOVER_PENALTY`
+- `TRADE_RATIO_FLOOR`
+- `CONSERVATIVE_MIN_BUY_THRESHOLD_MIN`
+- `CONSERVATIVE_MIN_BUY_THRESHOLD_MAX`
+- `MAX_CALIBRATION_ECE_ALERT`
 - `COST_BPS`
 - `SLIPPAGE_BPS`
 - `MIN_COVERAGE_RATIO`
@@ -87,6 +124,13 @@ Claves relevantes:
 - `CALIBRATION_MIN_SAMPLES`
 - `USE_SYNTHETIC_SAMPLING`
 - `XGB_PARAMS` (bloque completo de hiperparámetros)
+- `BENCHMARK_TICKERS`
+- `NET_RETURN_FLOOR_PER_FOLD`
+- `MIN_VALID_FOLDS_RATIO`
+- `ROBUST_SCORE_STD_WEIGHT`
+- `ENCODER_ABLATION_ENABLED`
+- `ENCODER_REQUIRED_DELTA_ROBUST_SCORE`
+- `ENCODER_REQUIRED_DELTA_NET_SHARPE`
 
 Ejemplo de uso:
 

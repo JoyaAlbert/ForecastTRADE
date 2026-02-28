@@ -22,11 +22,12 @@ def conservative_recommendation(
     sl_pct: float,
     cost_pct: float,
     regime_allowed: bool = True,
+    min_ev_margin: float = 0.0,
 ) -> RecommendationDecision:
     ev = compute_expected_value(probability, tp_pct, sl_pct, cost_pct)
     if not regime_allowed:
         return RecommendationDecision("NO_TRADE", ev, 0.0, "blocked_by_regime")
-    if ev <= 0:
+    if ev <= float(min_ev_margin):
         return RecommendationDecision("WATCHLIST", ev, max(0.0, probability - 0.5), "non_positive_ev")
     if probability < dynamic_threshold:
         return RecommendationDecision("WATCHLIST", ev, max(0.0, probability - 0.5), "below_dynamic_threshold")

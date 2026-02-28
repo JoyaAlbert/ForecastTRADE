@@ -33,11 +33,12 @@ class AccumulativeRunLogger:
             with open(log_file, 'r') as f:
                 self.runs = json.load(f)
         else:
-            self.runs = {
+                self.runs = {
                 'metadata': {
                     'created': datetime.now().isoformat(),
                     'description': 'Accumulative log of LSTM-XGBoost hybrid model runs',
                     'total_runs': 0,
+                'baselines': {},
                 'best_auc': 0.0,
                 'best_accuracy': 0.0,
                 'best_sharpe': -np.inf,
@@ -45,6 +46,33 @@ class AccumulativeRunLogger:
             },
                 'runs': []
             }
+        self.runs.setdefault('metadata', {})
+        self.runs['metadata'].setdefault('baselines', {})
+
+    def freeze_latest_as_baseline(self, baseline_tag: str, ticker: str | None = None) -> bool:
+        """Persist the latest run snapshot under a stable baseline tag."""
+        tag = str(baseline_tag or "").strip()
+        if not tag or tag in self.runs['metadata'].get('baselines', {}):
+            return False
+
+        selected = None
+        for run in reversed(self.runs.get('runs', [])):
+            if ticker is None or str(run.get('ticker', '')).upper() == str(ticker).upper():
+                selected = run
+                break
+        if selected is None:
+            return False
+
+        self.runs['metadata']['baselines'][tag] = {
+            'timestamp': datetime.now().isoformat(),
+            'run_number': selected.get('run_number'),
+            'ticker': selected.get('ticker'),
+            'metrics': selected.get('metrics', {}),
+            'financial_metrics': selected.get('financial_metrics', {}),
+            'cv': selected.get('cv', {}),
+        }
+        self.save()
+        return True
     
     def log_run(self, run_config):
         """
@@ -112,6 +140,10 @@ class AccumulativeRunLogger:
                 'win_rate': float(run_config.get('win_rate', 0))
             },
             'coverage_ratio': float(run_config.get('cv', {}).get('coverage_ratio', np.nan)),
+            'trade_coverage': float(run_config.get('trade_coverage', np.nan)),
+            'n_long_signals_raw': int(run_config.get('n_long_signals_raw', 0)),
+            'n_long_signals_post_filters': int(run_config.get('n_long_signals_post_filters', 0)),
+            'ev_mean_fold': float(run_config.get('ev_mean_fold', np.nan)),
             'calibration_error': float(run_config.get('metrics', {}).get('calibration_error', np.nan)),
             'recommendation_quality': float(run_config.get('recommendation_quality', np.nan)),
             
@@ -259,6 +291,10 @@ class AccumulativeRunLogger:
                 'net_return': run['financial_metrics'].get('net_return'),
                 'turnover': run['financial_metrics'].get('turnover'),
                 'coverage_ratio': run.get('coverage_ratio'),
+                'trade_coverage': run.get('trade_coverage'),
+                'n_long_signals_raw': run.get('n_long_signals_raw'),
+                'n_long_signals_post_filters': run.get('n_long_signals_post_filters'),
+                'ev_mean_fold': run.get('ev_mean_fold'),
                 'calibration_error': run.get('calibration_error'),
                 'recommendation_quality': run.get('recommendation_quality'),
                 'buy_signals': run['predictions']['buy_signals'],

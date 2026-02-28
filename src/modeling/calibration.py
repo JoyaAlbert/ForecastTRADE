@@ -28,9 +28,13 @@ def fit_probability_calibrator(raw_train_proba, y_calib, method: str = "isotonic
         raw_train_proba = np.asarray(raw_train_proba, dtype=float)
         y_calib = np.asarray(y_calib).astype(int)
         if method == "isotonic":
-            iso = IsotonicRegression(out_of_bounds="clip")
-            iso.fit(raw_train_proba, y_calib)
-            return LocalCalibrator(iso, "isotonic"), "ok"
+            try:
+                iso = IsotonicRegression(out_of_bounds="clip")
+                iso.fit(raw_train_proba, y_calib)
+                return LocalCalibrator(iso, "isotonic"), "ok"
+            except Exception:
+                # Fallback to Platt scaling when isotonic fails or is unstable.
+                method = "sigmoid"
         lr = LogisticRegression(solver="lbfgs", max_iter=500, random_state=42)
         lr.fit(raw_train_proba.reshape(-1, 1), y_calib)
         return LocalCalibrator(lr, "sigmoid"), "ok"
@@ -67,11 +71,12 @@ def calibration_metrics(y_true: np.ndarray, proba: np.ndarray) -> Dict[str, floa
 
 def train_calibration_split(X_train, y_train, raw_train_proba, ratio: float = 0.2) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     n = len(y_train)
-    if n < 120:
+    if n < 100:
         return None
+    ratio = float(np.clip(ratio, 0.10, 0.30))
     split = int(n * (1.0 - ratio))
     y_cal = np.asarray(y_train)[split:]
     proba_cal = np.asarray(raw_train_proba)[split:]
-    if len(np.unique(y_cal)) < 2:
+    if len(y_cal) < 30 or len(np.unique(y_cal)) < 2:
         return None
     return proba_cal, y_cal

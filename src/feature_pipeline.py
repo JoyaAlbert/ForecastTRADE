@@ -28,12 +28,13 @@ def run_feature_pipeline(
     fingerprint = CacheManager.fingerprint_df(df, columns=["open", "high", "low", "close", "volume", "vix_close"])
     cache_key = CacheManager.hash_payload(
         {
-            "schema": "feature_pipeline_v1",
+            "schema": "feature_pipeline_v2",
             "ticker": ticker,
             "df": fingerprint,
             "seed_features": seed_features,
             "min_features": min_features,
             "leakage_safe_lstm": leakage_safe_lstm,
+            "seq_encoder": getattr(runtime, "seq_encoder", "lstm"),
         }
     )
 
